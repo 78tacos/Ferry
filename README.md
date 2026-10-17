@@ -126,6 +126,7 @@ Requires the .NET 10 SDK on Windows.
 dotnet build Ferry.slnx
 dotnet test tests\Ferry.Core.Tests
 .\build\publish.ps1          # tests, then single-file Ferry.exe + ferry-cli.exe in dist\Ferry-<version>\
+.\build\release.ps1          # from a clean commit: publish, zip, SHA-256 checksums, tag v<version>
 .\build\make-icon.ps1        # regenerates src\Ferry.App\Assets\ferry.ico
 ```
 

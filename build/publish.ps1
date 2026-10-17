@@ -1,4 +1,4 @@
-# Builds Ferry for distribution: the app (Ferry.exe) and the command line (ferry.exe), each a single
+# Builds Ferry for distribution: the app (Ferry.exe) and the command line (ferry-cli.exe), each a single
 # self-contained file, so they run straight from a USB stick on PCs without .NET installed.
 param(
     [string]$Configuration = 'Release',
@@ -28,7 +28,7 @@ foreach ($project in 'src\Ferry.App\Ferry.App.csproj', 'src\Ferry.Cli\Ferry.Cli.
     dotnet publish (Join-Path $root $project) @common
     if ($LASTEXITCODE -ne 0) { throw "Publishing $project failed." }
 }
-Copy-Item (Join-Path $root 'README.md') $out -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $root 'README.md'), (Join-Path $root 'CHANGELOG.md') $out -ErrorAction SilentlyContinue
 # The user and IT guides (with their screenshots) travel with the executables; the README links to them there too.
 Copy-Item (Join-Path $root 'docs') $out -Recurse -Force -ErrorAction SilentlyContinue
 
