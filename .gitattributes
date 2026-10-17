@@ -1,0 +1,4 @@
+# Store text with LF in the repository and check it out with the platform's line endings.
+* text=auto
+*.png binary
+*.ico binary

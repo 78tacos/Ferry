@@ -1,0 +1,592 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Ferry.App"
+                    xmlns:vm="clr-namespace:Ferry.App.ViewModels">
+
+    <!-- ───────────────────────────── Start ───────────────────────────── -->
+
+    <DataTemplate DataType="{x:Type vm:HomeViewModel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+                <Button Style="{StaticResource ChoiceCard}" Command="{Binding OldPcCommand}">
+                    <local:ChoiceInfo Icon="&#xE898;" Title="This is my old PC"
+                                      Description="Send files, settings and programs from this PC to your new one, over the network or with a migration file." />
+                </Button>
+                <Button Style="{StaticResource ChoiceCard}" Command="{Binding NewPcCommand}">
+                    <local:ChoiceInfo Icon="&#xE896;" Title="This is my new PC"
+                                      Description="Bring everything over from your old PC, and reinstall your programs automatically." />
+                </Button>
+                <Button Style="{StaticResource ChoiceCard}" Command="{Binding UndoCommand}">
+                    <local:ChoiceInfo Icon="&#xE7A7;" Title="Undo a migration"
+                                      Description="Put this PC back the way it was before something was moved onto it." />
+                </Button>
+                <StackPanel Orientation="Horizontal" Margin="4,10,0,0">
+                    <TextBlock Text="{Binding MachineText}" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                    <Button Content="Past reports" Style="{StaticResource LinkButton}" Command="{Binding ReportsCommand}" FontSize="12" Margin="16,0,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:SendMethodViewModel}">
+        <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+            <Button Style="{StaticResource ChoiceCard}" Command="{Binding NetworkCommand}">
+                <local:ChoiceInfo Icon="&#xE701;" Title="Over the network" Badge="Recommended"
+                                  Description="Both PCs on the same network (Wi-Fi or cable). The fastest way, and you pick what to move on the new PC." />
+            </Button>
+            <Button Style="{StaticResource ChoiceCard}" Command="{Binding FileCommand}">
+                <local:ChoiceInfo Icon="&#xE88E;" Title="With a migration file"
+                                  Description="Save everything to a USB drive, external disk or network share, then open it on the new PC. Good when the PCs can't be connected." />
+            </Button>
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:ReceiveMethodViewModel}">
+        <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+            <Button Style="{StaticResource ChoiceCard}" Command="{Binding NetworkCommand}">
+                <local:ChoiceInfo Icon="&#xE701;" Title="Over the network" Badge="Recommended"
+                                  Description="Ferry waits here and shows a code. Type it on the old PC to connect." />
+            </Button>
+            <Button Style="{StaticResource ChoiceCard}" Command="{Binding FileCommand}">
+                <local:ChoiceInfo Icon="&#xE8E5;" Title="From a migration file"
+                                  Description="Open the .ferry file saved on your old PC." />
+            </Button>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- ───────────────────────────── Old PC ───────────────────────────── -->
+
+    <DataTemplate DataType="{x:Type vm:ConnectViewModel}">
+        <Grid MaxWidth="820" HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="24" />
+                <ColumnDefinition Width="300" />
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="New PCs waiting on this network" Style="{StaticResource Strong}" Margin="0,0,0,10" />
+                    <Grid>
+                        <ListBox ItemsSource="{Binding Peers}" SelectedItem="{Binding SelectedPeer}" BorderThickness="0" Background="Transparent" MinHeight="180">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                                        <TextBlock Style="{StaticResource Icon}" Text="&#xE7F8;" FontSize="22" Margin="0,0,12,0" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" Style="{StaticResource Strong}" />
+                                            <TextBlock Style="{StaticResource Caption}">
+                                                <Run Text="{Binding Os, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Address, Mode=OneWay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding NoPeers, Converter={StaticResource BoolToVisibility}}">
+                            <ProgressBar IsIndeterminate="True" Width="120" Margin="0,0,0,12" />
+                            <TextBlock Text="Looking for a new PC running Ferry…" Style="{StaticResource Muted}" HorizontalAlignment="Center" />
+                            <TextBlock Text="If it doesn't show up, type its name or address instead." Style="{StaticResource Caption}" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Grid>
+                </DockPanel>
+            </Border>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="New PC's name or address" Style="{StaticResource Strong}" Margin="0,0,0,6" />
+                <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="New PC name or address" />
+                <TextBlock Text="Pairing code shown on the new PC" Style="{StaticResource Strong}" Margin="0,18,0,6" />
+                <TextBox Text="{Binding Code, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Pairing code" CharacterCasing="Upper" FontFamily="Cascadia Mono, Consolas"
+                         FontSize="20" MaxLength="16" />
+                <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                           Text="The connection is encrypted, and only the PC showing this code can receive your data." />
+                <ProgressBar IsIndeterminate="True" Margin="0,18,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+        </Grid>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:ScanViewModel}">
+        <Border Style="{StaticResource Card}" MaxWidth="720" HorizontalAlignment="Left" VerticalAlignment="Top" Padding="24">
+            <StackPanel>
+                <ProgressBar IsIndeterminate="True" Height="6" Margin="0,0,0,14" />
+                <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:SaveFileViewModel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                <TextBlock Text="Save to" Style="{StaticResource Strong}" Margin="0,0,0,6" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged, Delay=300}" AutomationProperties.Name="Save to" />
+                    <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseCommand}" Margin="8,0,0,0" MinWidth="96" />
+                </Grid>
+                <TextBlock Text="{Binding SizeText}" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+
+                <CheckBox IsChecked="{Binding UsePassword}" Margin="0,22,0,0" AutomationProperties.Name="Protect the file with a password">
+                    <TextBlock Style="{StaticResource Body}" Text="Protect the file with a password (recommended: it contains Wi-Fi passwords and browser data)" />
+                </CheckBox>
+                <Grid Margin="28,10,0,0" Visibility="{Binding UsePassword, Converter={StaticResource BoolToVisibility}}" Width="460" HorizontalAlignment="Left">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Password" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+                    <TextBlock Grid.Column="2" Text="Type it again" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+                    <PasswordBox Grid.Row="1" local:PasswordBoxHelper.BoundPassword="{Binding Password}" AutomationProperties.Name="Password" />
+                    <PasswordBox Grid.Row="1" Grid.Column="2" local:PasswordBoxHelper.BoundPassword="{Binding Confirm}" AutomationProperties.Name="Confirm password" />
+                    <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="{Binding PasswordHint}" Margin="0,6,0,0" FontSize="12"
+                               Foreground="{DynamicResource SystemFillColorCautionBrush}" Visibility="{Binding PasswordHint, Converter={StaticResource NullToCollapsed}}" />
+                </Grid>
+
+                <CheckBox IsChecked="{Binding UseShadowCopy}" IsEnabled="{Binding CanUseShadowCopy}" Margin="0,16,0,0" AutomationProperties.Name="Copy files that are open in other programs">
+                    <TextBlock Style="{StaticResource Body}" Text="Copy files that are open in other programs, using a shadow copy (needs administrator)" />
+                </CheckBox>
+
+                <ItemsControl ItemsSource="{Binding Issues}" Margin="0,20,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Bar" Style="{StaticResource WarningBar}">
+                                <TextBlock Text="{Binding Text}" Style="{StaticResource Body}" />
+                            </Border>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Blocking}" Value="True">
+                                    <Setter TargetName="Bar" Property="Style" Value="{StaticResource ErrorBar}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- ───────────────────────────── New PC ───────────────────────────── -->
+
+    <DataTemplate DataType="{x:Type vm:WaitViewModel}">
+        <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+            <Border Style="{StaticResource Card}" Padding="28,24" Visibility="{Binding IsConnected, Converter={StaticResource InverseBoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="PAIRING CODE" Style="{StaticResource Caption}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Code}" Style="{StaticResource CodeText}" Margin="0,2,0,18" />
+                    <TextBlock Text="On your old PC:" Style="{StaticResource Strong}" Margin="0,0,0,8" />
+                    <TextBlock Style="{StaticResource Body}" Margin="0,0,0,4">
+                        <Run Text="1.  Open Ferry and choose " /><Run Text="This is my old PC" FontWeight="SemiBold" /><Run Text=", then " /><Run Text="Over the network" FontWeight="SemiBold" /><Run Text="." />
+                    </TextBlock>
+                    <TextBlock Style="{StaticResource Body}" Margin="0,0,0,4">
+                        <Run Text="2.  Pick " /><Run Text="{Binding ComputerName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" from the list, or type " /><Run Text="{Binding AddressText, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="." />
+                    </TextBlock>
+                    <TextBlock Style="{StaticResource Body}" Text="3.  Type the code above." />
+                </StackPanel>
+            </Border>
+            <StackPanel Orientation="Horizontal" Margin="4,18,0,0">
+                <ProgressBar IsIndeterminate="True" Width="80" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" Margin="14,0,0,0" VerticalAlignment="Center" MaxWidth="600" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:OpenFileViewModel}">
+        <!-- MinWidth: a left-aligned panel shrinks to its content, which would leave an empty file box a few characters wide. -->
+        <StackPanel MinWidth="560" MaxWidth="720" HorizontalAlignment="Left">
+            <TextBlock Text="Migration file" Style="{StaticResource Strong}" Margin="0,0,0,6" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Text="{Binding Path, UpdateSourceTrigger=PropertyChanged, Delay=400}" AutomationProperties.Name="Migration file" />
+                <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseCommand}" Margin="8,0,0,0" MinWidth="96" />
+            </Grid>
+            <TextBlock Text="{Binding Info}" Style="{StaticResource Caption}" Margin="0,6,0,0" Visibility="{Binding Info, Converter={StaticResource NullToCollapsed}}" />
+            <StackPanel Margin="0,20,0,0" Visibility="{Binding NeedsPassword, Converter={StaticResource BoolToVisibility}}" Width="320" HorizontalAlignment="Left">
+                <TextBlock Text="Password" Style="{StaticResource Strong}" Margin="0,0,0,6" />
+                <PasswordBox local:PasswordBoxHelper.BoundPassword="{Binding Password}" AutomationProperties.Name="Password" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:RestoreOptionsViewModel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,12,0">
+                <TextBlock Text="Who gets what" Style="{StaticResource SectionTitle}" Visibility="{Binding HasUsers, Converter={StaticResource BoolToVisibility}}" />
+                <ItemsControl ItemsSource="{Binding Users}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Card}" Padding="16,12" Margin="0,0,0,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding SourceText}" Style="{StaticResource Strong}" />
+                                        <TextBlock Text="{Binding CountText}" Style="{StaticResource Caption}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource Icon}" Text="&#xE72A;" Margin="12,0" />
+                                        <ComboBox ItemsSource="{Binding Options}" SelectedItem="{Binding Selected}" DisplayMemberPath="Display" MinWidth="300" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,22" Visibility="{Binding HasUsers, Converter={StaticResource BoolToVisibility}}"
+                           Text="Someone missing? Sign in on this PC as them once, then start Ferry again." />
+
+                <TextBlock Text="When a file is already on this PC" Style="{StaticResource SectionTitle}" />
+                <ItemsControl ItemsSource="{Binding Conflicts}" Margin="0,0,0,22">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <RadioButton GroupName="conflicts" IsChecked="{Binding IsSelected}" Margin="0,0,0,10" AutomationProperties.Name="{Binding Title}" AutomationProperties.HelpText="{Binding Description}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource Strong}" />
+                                    <TextBlock Text="{Binding Description}" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                            </RadioButton>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel Visibility="{Binding HasFolders, Converter={StaticResource BoolToVisibility}}" Margin="0,0,0,22">
+                    <TextBlock Text="Folders from outside the user profiles" Style="{StaticResource SectionTitle}" />
+                    <ItemsControl ItemsSource="{Binding Folders}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="260" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Source}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Source}" />
+                                    <TextBlock Grid.Column="1" Style="{StaticResource Icon}" Text="&#xE72A;" Margin="12,0" />
+                                    <TextBox Grid.Column="2" Text="{Binding Target, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <TextBlock Text="Safety" Style="{StaticResource SectionTitle}" />
+                <CheckBox IsChecked="{Binding CreateRestorePoint}" IsEnabled="{Binding IsAdmin}" Margin="0,0,0,8" AutomationProperties.Name="Create a System Restore point first">
+                    <TextBlock Style="{StaticResource Body}" Text="Create a System Restore point first (on top of Ferry's own undo)" />
+                </CheckBox>
+                <CheckBox IsChecked="{Binding CloseApps}" Margin="0,0,0,8" AutomationProperties.Name="Close browsers, Outlook and Office when their data is moved">
+                    <TextBlock Style="{StaticResource Body}" Text="Close browsers, Outlook and Office if they're open when their data is moved" />
+                </CheckBox>
+                <CheckBox IsChecked="{Binding DryRun}" AutomationProperties.Name="Dry run">
+                    <TextBlock Style="{StaticResource Body}" Text="Dry run: go through everything and report what would happen, without changing anything" />
+                </CheckBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:SummaryViewModel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,12,0">
+                <Border Style="{StaticResource Card}" Padding="20,14">
+                    <StackPanel>
+                        <ItemsControl ItemsSource="{Binding Lines}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="100" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Name}" Style="{StaticResource Body}" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Count}" Style="{StaticResource Muted}" HorizontalAlignment="Right" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Size}" Style="{StaticResource Muted}" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Separator Margin="0,8" />
+                        <Grid>
+                            <TextBlock Text="Total" Style="{StaticResource Strong}" />
+                            <TextBlock Text="{Binding Total}" Style="{StaticResource Strong}" HorizontalAlignment="Right" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="People" Style="{StaticResource SectionTitle}" Margin="0,22,0,8" Visibility="{Binding Mappings, Converter={StaticResource CountToVisibility}}" />
+                <ItemsControl ItemsSource="{Binding Mappings}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" Style="{StaticResource Body}" Margin="0,0,0,4" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Style="{StaticResource InfoBar}" Margin="0,18,0,8" Visibility="{Binding AppsText, Converter={StaticResource NullToCollapsed}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding AppsText}" Style="{StaticResource Body}" />
+                    </StackPanel>
+                </Border>
+
+                <ItemsControl ItemsSource="{Binding Issues}" Margin="0,10,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Bar" Style="{StaticResource WarningBar}">
+                                <TextBlock Text="{Binding Text}" Style="{StaticResource Body}" />
+                            </Border>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Blocking}" Value="True">
+                                    <Setter TargetName="Bar" Property="Style" Value="{StaticResource ErrorBar}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="Close those programs for me" Command="{Binding CloseAppsCommand}" HorizontalAlignment="Left" Margin="0,4,0,0"
+                        Visibility="{Binding RunningApps, Converter={StaticResource CountToVisibility}}" />
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <!-- ──────────────────────────── Choosing ──────────────────────────── -->
+
+    <HierarchicalDataTemplate DataType="{x:Type vm:SelectionNode}" ItemsSource="{Binding Children}">
+        <Grid Margin="0,3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" MinWidth="0" Padding="0" Margin="0,0,6,0" AutomationProperties.Name="{Binding Name}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Width="{Binding HeaderWidth}">
+                <TextBlock Style="{StaticResource Icon}" Text="{Binding Icon}" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                           Visibility="{Binding Icon, Converter={StaticResource NullToCollapsed}}" />
+                <TextBlock x:Name="Name" Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                <TextBlock Text="{Binding CountText}" Style="{StaticResource Caption}" Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap" />
+            </StackPanel>
+            <TextBlock Grid.Column="2" Text="{Binding SizeText}" Style="{StaticResource Caption}" Margin="8,0,8,0" VerticalAlignment="Center"
+                       MinWidth="72" TextAlignment="Right" TextWrapping="NoWrap" />
+        </Grid>
+    </HierarchicalDataTemplate>
+
+    <HierarchicalDataTemplate DataType="{x:Type vm:ItemNode}" ItemsSource="{Binding Children}">
+        <Grid Margin="0,2" ToolTip="{Binding Description}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="236" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" MinWidth="0" Padding="0" Margin="0,0,6,0" AutomationProperties.Name="{Binding Name}" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="{Binding NameWidth}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" FontSize="13" Margin="8,0,0,0" Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                               ToolTip="{Binding WarningText}" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+                <TextBlock Text="{Binding Description}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding Description, Converter={StaticResource NullToCollapsed}}" />
+            </StackPanel>
+            <ComboBox Grid.Column="2" ItemsSource="{Binding Modes}" SelectedItem="{Binding Mode}" DisplayMemberPath="Display" Margin="12,0,0,0"
+                      VerticalAlignment="Center" Visibility="{Binding HasModes, Converter={StaticResource BoolToVisibility}}" />
+            <TextBlock Grid.Column="2" Text="{Binding ModeText}" Style="{StaticResource Caption}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis" Visibility="{Binding HasModes, Converter={StaticResource InverseBoolToVisibility}}" />
+            <TextBlock Grid.Column="3" Text="{Binding SizeText}" Style="{StaticResource Caption}" Margin="8,0,8,0" VerticalAlignment="Center" MinWidth="72"
+                       TextAlignment="Right" TextWrapping="NoWrap" />
+        </Grid>
+    </HierarchicalDataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:SelectViewModel}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ItemsControl ItemsSource="{Binding Warnings}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource WarningBar}">
+                            <TextBlock Text="{Binding}" Style="{StaticResource Body}" />
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <DockPanel Grid.Row="1" Margin="0,0,0,10" LastChildFill="False">
+                <Grid DockPanel.Dock="Left" Width="260">
+                    <TextBox x:Name="Search" Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged, Delay=250}" AutomationProperties.Name="Search" />
+                    <TextBlock Text="Search" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=Search}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+                <Button DockPanel.Dock="Left" Content="Usual choices" Command="{Binding DefaultsCommand}" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Left" Content="All" Command="{Binding AllCommand}" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Left" Content="None" Command="{Binding NoneCommand}" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Save choices…" Command="{Binding SavePlanCommand}" Margin="8,0,0,0"
+                        ToolTip="Save these choices to a plan file for silent migrations with ferry.exe" />
+                <Button DockPanel.Dock="Right" Content="Add a folder…" Command="{Binding AddFolderCommand}"
+                        Visibility="{Binding CanAddFolders, Converter={StaticResource BoolToVisibility}}" />
+            </DockPanel>
+            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="6">
+                <TreeView ItemsSource="{Binding Categories}" BorderThickness="0" Background="Transparent"
+                          VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                            <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                </TreeView>
+            </Border>
+            <TextBlock Grid.Row="3" Text="{Binding Summary}" Style="{StaticResource Strong}" HorizontalAlignment="Right" Margin="0,10,4,0" />
+        </Grid>
+    </DataTemplate>
+
+    <!-- ──────────────────────────── Progress & results ──────────────────────────── -->
+
+    <DataTemplate DataType="{x:Type vm:ProgressViewModelBase}">
+        <Border Style="{StaticResource Card}" Width="640" HorizontalAlignment="Left" VerticalAlignment="Top" Padding="24,20">
+            <StackPanel>
+                <TextBlock Text="{Binding Phase}" Style="{StaticResource Strong}" FontSize="16" />
+                <ProgressBar Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding IsIndeterminate, Mode=OneWay}" Maximum="100" Height="6" Margin="0,14,0,10" />
+                <Grid>
+                    <TextBlock Text="{Binding BytesText}" Style="{StaticResource Caption}" />
+                    <TextBlock Style="{StaticResource Caption}" HorizontalAlignment="Right">
+                        <Run Text="{Binding SpeedText, Mode=OneWay}" /><Run Text="   " /><Run Text="{Binding EtaText, Mode=OneWay}" />
+                    </TextBlock>
+                </Grid>
+                <TextBlock Text="{Binding CurrentItem}" Style="{StaticResource Body}" Margin="0,16,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                <TextBlock Text="{Binding CurrentDetail}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                <TextBlock Text="{Binding ElapsedText}" Style="{StaticResource Caption}" Margin="0,16,0,0" />
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:DoneViewModel}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,12,0">
+                <WrapPanel Margin="0,0,0,18">
+                    <Button Content="Open the report" Command="{Binding OpenReportCommand}" Style="{DynamicResource AccentButtonStyle}" Margin="0,0,8,8" />
+                    <Button Content="Open the new PC's report" Command="{Binding OpenRemoteReportCommand}" Margin="0,0,8,8"
+                            Visibility="{Binding HasRemoteReport, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="Show the file" Command="{Binding ShowFileCommand}" Margin="0,0,8,8" Visibility="{Binding HasFile, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="Undo this migration" Command="{Binding UndoCommand}" Margin="0,0,8,8" Visibility="{Binding CanUndo, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="Finish" Command="{Binding FinishCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
+
+                <StackPanel Visibility="{Binding ManualSteps, Converter={StaticResource CountToVisibility}}" Margin="0,0,0,18">
+                    <TextBlock Text="Still to do" Style="{StaticResource SectionTitle}" />
+                    <Border Style="{StaticResource Card}" Padding="16,10">
+                        <ItemsControl ItemsSource="{Binding ManualSteps}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Margin="0,4" AutomationProperties.Name="{Binding}">
+                                        <TextBlock Text="{Binding}" Style="{StaticResource Body}" />
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                </StackPanel>
+
+                <Expander Header="{Binding ProgramsNotMovedTitle}" Margin="0,0,0,18" HorizontalAlignment="Stretch"
+                          Visibility="{Binding ProgramsNotMoved, Converter={StaticResource CountToVisibility}}">
+                    <StackPanel Margin="4,8,0,0">
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,8"
+                                   Text="These were on the old PC but weren't selected or couldn't be reinstalled. Install the ones you still use." />
+                        <ItemsControl ItemsSource="{Binding ProgramsNotMoved}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="2" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Style="{StaticResource Caption}" Margin="0,2,12,2" TextTrimming="CharacterEllipsis"
+                                               TextWrapping="NoWrap" ToolTip="{Binding}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
+                <StackPanel Visibility="{Binding Problems, Converter={StaticResource CountToVisibility}}" Margin="0,0,0,18">
+                    <TextBlock Text="Couldn't be moved" Style="{StaticResource SectionTitle}" />
+                    <ItemsControl ItemsSource="{Binding Problems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource ErrorBar}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource Strong}">
+                                            <Run Text="{Binding Name, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Group, Mode=OneWay}" FontWeight="Normal" FontSize="12" />
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Message}" Style="{StaticResource Body}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <StackPanel Visibility="{Binding Notes, Converter={StaticResource CountToVisibility}}">
+                    <TextBlock Text="Good to know" Style="{StaticResource SectionTitle}" />
+                    <ItemsControl ItemsSource="{Binding Notes}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Style="{StaticResource Icon}" Text="&#xE946;" FontSize="14" Margin="0,0,10,0" VerticalAlignment="Top" />
+                                    <TextBlock Text="{Binding}" Style="{StaticResource Body}" MaxWidth="700" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vm:UndoViewModel}">
+        <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+            <Border Style="{StaticResource InfoBar}" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Nothing has been moved onto this PC with Ferry, so there's nothing to undo." Style="{StaticResource Body}" />
+            </Border>
+            <Border Style="{StaticResource Card}" Padding="6" Visibility="{Binding IsEmpty, Converter={StaticResource InverseBoolToVisibility}}">
+                <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" BorderThickness="0" Background="Transparent" MaxHeight="380">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="4,6">
+                                <TextBlock Text="{Binding Title}" Style="{StaticResource Strong}" />
+                                <TextBlock Text="{Binding Details}" Style="{StaticResource Caption}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+            <Button Content="Delete undo data…" Command="{Binding DiscardCommand}" HorizontalAlignment="Left" Margin="0,12,0,0"
+                    ToolTip="Frees the space used by backups of replaced files. That migration can't be undone afterwards."
+                    Visibility="{Binding IsEmpty, Converter={StaticResource InverseBoolToVisibility}}" />
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>

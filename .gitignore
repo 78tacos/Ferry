@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+.vs/
+*.user
+TestResults/
+*.ferry
+*.ferry.0*

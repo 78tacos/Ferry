@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ferry-cli</AssemblyName>
+    <RootNamespace>Ferry.Cli</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Description>Ferry command line: scripted and silent PC migrations.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ferry.Core\Ferry.Core.csproj" />
+  </ItemGroup>
+
+</Project>

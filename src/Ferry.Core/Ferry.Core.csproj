@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>Ferry.Core</AssemblyName>
+    <RootNamespace>Ferry.Core</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Migration engine: scanning, packaging, transport, restore and undo.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ferry.Core.Tests" />
+  </ItemGroup>
+
+</Project>
