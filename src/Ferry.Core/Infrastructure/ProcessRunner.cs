@@ -33,6 +33,31 @@ public static class ProcessRunner
     /// <summary>Full path of a tool in System32, so we never pick up a same-named program from the current directory.</summary>
     public static string System32(string exe) => Path.Combine(Environment.SystemDirectory, exe);
 
+    /// <summary>
+    /// True when <paramref name="value"/> can sit inside a tool's own double quotes
+    /// (<c>name="…"</c>, <c>/n"…"</c>) without breaking out of them or being read as a new switch.
+    /// </summary>
+    internal static bool IsSafeQuotedValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return true;
+        if (value[0] == '-')
+            return false;
+        return value.IndexOfAny(['"', '\r', '\n']) < 0;
+    }
+
+    /// <summary>
+    /// The command-line text <see cref="ProcessStartInfo.ArgumentList"/> produces on Windows.
+    /// Undo stores that text and runs it later with <see cref="RunRawAsync"/>.
+    /// </summary>
+    internal static string FormatArguments(IEnumerable<string> arguments)
+    {
+        var builder = new StringBuilder();
+        foreach (var argument in arguments)
+            AppendArgument(builder, argument);
+        return builder.ToString();
+    }
+
     private static ProcessStartInfo CreateStartInfo(string fileName, Encoding? outputEncoding)
     {
         // Console tools such as netsh and reg write in the OEM code page when redirected.
@@ -107,6 +132,71 @@ public static class ProcessRunner
     }
 
     private static string Quote(string arg) => arg.Contains(' ') ? $"\"{arg}\"" : arg;
+
+    /// <summary>Matches the runtime's PasteArguments, which is what <see cref="ProcessStartInfo.ArgumentList"/> uses on Windows.</summary>
+    private static void AppendArgument(StringBuilder builder, string argument)
+    {
+        if (builder.Length != 0)
+            builder.Append(' ');
+
+        if (argument.Length != 0 && ContainsNoWhitespaceOrQuotes(argument))
+        {
+            builder.Append(argument);
+            return;
+        }
+
+        builder.Append('"');
+        var idx = 0;
+        while (idx < argument.Length)
+        {
+            var c = argument[idx++];
+            if (c == '\\')
+            {
+                var slashes = 1;
+                while (idx < argument.Length && argument[idx] == '\\')
+                {
+                    idx++;
+                    slashes++;
+                }
+
+                if (idx == argument.Length)
+                {
+                    builder.Append('\\', slashes * 2);
+                }
+                else if (argument[idx] == '"')
+                {
+                    builder.Append('\\', slashes * 2 + 1);
+                    builder.Append('"');
+                    idx++;
+                }
+                else
+                {
+                    builder.Append('\\', slashes);
+                }
+                continue;
+            }
+
+            if (c == '"')
+            {
+                builder.Append('\\');
+                builder.Append('"');
+                continue;
+            }
+
+            builder.Append(c);
+        }
+        builder.Append('"');
+    }
+
+    private static bool ContainsNoWhitespaceOrQuotes(string value)
+    {
+        foreach (var c in value)
+        {
+            if (char.IsWhiteSpace(c) || c == '"')
+                return false;
+        }
+        return true;
+    }
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max] + "…";
 

@@ -54,8 +54,13 @@ public sealed class WifiMigrator : MigratorBase
     {
         var name = entry.Header.GetMeta("name") ?? item.Name;
         var xml = await entry.ReadAllBytesAsync(ct).ConfigureAwait(false);
+        if (!TryProfileArguments(name, out var showArguments, out var deleteArguments))
+        {
+            context.Results.MarkFailed(item, "This network's name can't be passed to netsh safely, so it was left unchanged.");
+            return;
+        }
 
-        var exists = await ProcessRunner.RunRawAsync(Netsh, $"wlan show profile name=\"{name}\"", ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        var exists = await ProcessRunner.RunRawAsync(Netsh, showArguments, ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
         if (exists.Succeeded)
         {
             context.Results.Info(item, "Already saved on this PC.");
@@ -73,7 +78,7 @@ public sealed class WifiMigrator : MigratorBase
             var file = Path.Combine(dir, "profile.xml");
             await File.WriteAllBytesAsync(file, xml, ct).ConfigureAwait(false);
             var result = await context.RunAsync(item, $"Wi-Fi network {name}", Netsh, $"wlan add profile filename=\"{file}\" user=all",
-                Netsh, $"wlan delete profile name=\"{name}\"", ct).ConfigureAwait(false);
+                Netsh, deleteArguments, ct).ConfigureAwait(false);
             if (result.Succeeded)
                 context.Results.FileDone(item, xml.Length);
             else if (result.CombinedOutput.Contains("wlansvc", StringComparison.OrdinalIgnoreCase))
@@ -140,4 +145,22 @@ public sealed class WifiMigrator : MigratorBase
 
     private static string Safe(string name) =>
         new(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == '/' ? '_' : c).ToArray());
+
+    /// <summary>
+    /// netsh parses its own command line. A profile name is <c>name="…"</c>, including when it contains spaces.
+    /// A quote, a line break, or a leading dash can break out of that form, so those names are refused.
+    /// The delete command stored for undo uses the same quoting.
+    /// </summary>
+    internal static bool TryProfileArguments(string? name, out string showArguments, out string deleteArguments)
+    {
+        if (!ProcessRunner.IsSafeQuotedValue(name))
+        {
+            showArguments = "";
+            deleteArguments = "";
+            return false;
+        }
+        showArguments = $"wlan show profile name=\"{name}\"";
+        deleteArguments = $"wlan delete profile name=\"{name}\"";
+        return true;
+    }
 }
