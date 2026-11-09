@@ -66,7 +66,7 @@ public sealed class AppSettingsMigrator : MigratorBase
             var roaming = user.FolderPaths.GetValueOrDefault(KnownFolders.RoamingAppData.Key) ?? Path.Combine(user.ProfilePath, @"AppData\Roaming");
             var local = user.FolderPaths.GetValueOrDefault(KnownFolders.LocalAppData.Key) ?? Path.Combine(user.ProfilePath, @"AppData\Local");
 
-            foreach (var dir in SafeDirectories(roaming))
+            foreach (var dir in DirectoryListing.SafeDirectories(roaming))
             {
                 var name = Path.GetFileName(dir);
                 if (SkippedRoaming.Contains(name) || name.StartsWith('.') && name.Length < 3)
@@ -80,7 +80,7 @@ public sealed class AppSettingsMigrator : MigratorBase
                 tasks.Add(MeasureAsync(item, dir, rules, ct));
             }
 
-            foreach (var dir in SafeDirectories(local))
+            foreach (var dir in DirectoryListing.SafeDirectories(local))
             {
                 var name = Path.GetFileName(dir);
                 if (SkippedLocal.Contains(name))
@@ -192,29 +192,5 @@ public sealed class AppSettingsMigrator : MigratorBase
         else
             // Settings from the old PC should win over defaults an app may already have written here.
             await context.Files.RestoreAsync(entry, item, logicalPath, ct, remap, ConflictPolicy.Overwrite, remapText: true, background: true).ConfigureAwait(false);
-    }
-
-    private static IEnumerable<string> SafeDirectories(string path)
-    {
-        try
-        {
-            return Directory.Exists(path) ? Directory.EnumerateDirectories(path).Where(d => !IsLink(d)).ToList() : [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private static bool IsLink(string dir)
-    {
-        try
-        {
-            return new DirectoryInfo(dir).LinkTarget is not null;
-        }
-        catch
-        {
-            return true;
-        }
     }
 }
