@@ -43,7 +43,7 @@ public sealed class FoldersMigrator : MigratorBase
 
         foreach (var drive in context.Machine.Drives.Where(d => IncludeDriveRoots && !d.IsRemovable))
         {
-            foreach (var dir in SafeDirectories(drive.Name))
+            foreach (var dir in DirectoryListing.SafeDirectories(drive.Name))
             {
                 var name = Path.GetFileName(dir);
                 if (name.StartsWith('$') || name.StartsWith('.') || SystemRootFolders.Contains(name))
@@ -139,16 +139,4 @@ public sealed class FoldersMigrator : MigratorBase
     }
 
     private static string KeyOf(InventoryItem item) => item.Id[(item.Id.IndexOf(':') + 1)..];
-
-    private static IEnumerable<string> SafeDirectories(string path)
-    {
-        try
-        {
-            return Directory.EnumerateDirectories(path).ToList();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
 }

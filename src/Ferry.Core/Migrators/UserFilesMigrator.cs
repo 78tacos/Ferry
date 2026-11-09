@@ -74,12 +74,12 @@ public sealed class UserFilesMigrator : MigratorBase
                 tasks.Add(MeasureAsync(item, path, FolderRules(context.Exclusions), ct));
             }
 
-            foreach (var dir in SafeDirectories(user.ProfilePath))
+            foreach (var dir in DirectoryListing.SafeDirectories(user.ProfilePath))
             {
                 var name = Path.GetFileName(dir);
                 if (SkippedProfileFolders.Contains(name) || knownPaths.Any(k => string.Equals(k, dir, StringComparison.OrdinalIgnoreCase)) ||
                     user.OneDriveRoots.Any(r => string.Equals(r, dir, StringComparison.OrdinalIgnoreCase)) ||
-                    name.StartsWith("OneDrive", StringComparison.OrdinalIgnoreCase) || IsLink(dir))
+                    name.StartsWith("OneDrive", StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 var item = NewItem($"{user.Sid}:{ProfileFolderKind}:{name}", user.AccountName, name, user.Sid);
@@ -212,30 +212,6 @@ public sealed class UserFilesMigrator : MigratorBase
             if (excluded.IsExcluded(file.Name) || FileWalker.IsCloudOnly(file.Attributes) || (file.Attributes & FileAttributes.ReparsePoint) != 0)
                 continue;
             yield return file;
-        }
-    }
-
-    private static IEnumerable<string> SafeDirectories(string path)
-    {
-        try
-        {
-            return Directory.EnumerateDirectories(path).ToList();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private static bool IsLink(string dir)
-    {
-        try
-        {
-            return new DirectoryInfo(dir).LinkTarget is not null;
-        }
-        catch
-        {
-            return true;
         }
     }
 }
