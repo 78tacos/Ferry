@@ -142,24 +142,17 @@ public sealed class PrintersMigrator : MigratorBase
     {
         if (!context.TryGetTargetUser(item, out var target))
             return;
-        var printUi = $"{ProcessRunner.System32("rundll32.exe")}";
-        string args, undo;
-        if (target.Sid == Elevation.CurrentUserSid)
+        var forCurrentUser = target.Sid == Elevation.CurrentUserSid;
+        if (!TryConnectionArguments(connection, forCurrentUser, out var args, out var undo))
         {
-            // The account running Ferry: connect right away.
-            args = $"printui.dll,PrintUIEntry /in /q /n\"{connection}\"";
-            undo = $"printui.dll,PrintUIEntry /dn /q /n\"{connection}\"";
+            context.Results.MarkFailed(item, "This printer's path can't be passed to the printer setup safely, so it was left unchanged.");
+            return;
         }
-        else
-        {
-            // Another user: a per-machine connection appears for everyone at their next sign-in.
-            args = $"printui.dll,PrintUIEntry /ga /q /n\"{connection}\"";
-            undo = $"printui.dll,PrintUIEntry /gd /q /n\"{connection}\"";
-        }
+        var printUi = ProcessRunner.System32("rundll32.exe");
         var result = await context.RunAsync(item, $"Printer {connection}", printUi, args, printUi, undo, ct, TimeSpan.FromMinutes(5)).ConfigureAwait(false);
         if (result.Succeeded)
         {
-            context.Results.Info(item, target.Sid == Elevation.CurrentUserSid
+            context.Results.Info(item, forCurrentUser
                 ? "Connected."
                 : $"Added; it appears for {target.UserName} at their next sign-in.");
         }
@@ -218,5 +211,25 @@ public sealed class PrintersMigrator : MigratorBase
             context.Results.ManualStep($"Install the printer {printer.Name} at {printer.PrinterHostAddress}" +
                                        (driverMissing ? $" (get the \"{printer.DriverName}\" driver from the maker's website)." : "."));
         }
+    }
+
+    /// <summary>
+    /// printui parses the raw command line, and the share is <c>/n"…"</c>. A quote, a line break, or a leading
+    /// dash can break out of that form, so those paths are refused. The undo command uses the same quoting.
+    /// </summary>
+    internal static bool TryConnectionArguments(string? connection, bool forCurrentUser, out string arguments, out string undoArguments)
+    {
+        if (!ProcessRunner.IsSafeQuotedValue(connection))
+        {
+            arguments = "";
+            undoArguments = "";
+            return false;
+        }
+        // The account running Ferry connects right away. Another user's connection appears at their next sign-in.
+        var add = forCurrentUser ? "/in" : "/ga";
+        var remove = forCurrentUser ? "/dn" : "/gd";
+        arguments = $"printui.dll,PrintUIEntry {add} /q /n\"{connection}\"";
+        undoArguments = $"printui.dll,PrintUIEntry {remove} /q /n\"{connection}\"";
+        return true;
     }
 }

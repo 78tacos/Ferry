@@ -422,15 +422,39 @@ public sealed class ApplicationsMigrator : MigratorBase
         var binPath = InstallRemap(context, app).Remap(service.ImagePath);
         var start = service.Start switch { 2 => "auto", 4 => "disabled", _ => "demand" };
         var type = service.Type == 0x20 ? "share" : "own";
-        // sc.exe wants "option= value" with the space after '='.
-        var args = $"create \"{service.Name}\" binPath= \"{binPath.Replace("\"", "\\\"")}\" start= {start} type= {type} DisplayName= \"{service.DisplayName}\"";
-        var result = await context.RunAsync(item, $"Service {service.DisplayName}", ProcessRunner.System32("sc.exe"), args,
-            ProcessRunner.System32("sc.exe"), $"delete \"{service.Name}\"", ct).ConfigureAwait(false);
+        // sc.exe reads discrete argv: "option=" and the value are separate arguments, with the space after '='.
+        // The name and display name are passed that way, so a quote in either one stays inside its own argument.
+        var fileName = ProcessRunner.System32("sc.exe");
+        var createArguments = ServiceCreateArguments(service.Name, service.DisplayName, binPath, start, type);
+        var undoArguments = ProcessRunner.FormatArguments(ServiceDeleteArguments(service.Name));
+
+        ProcessResult result;
+        if (context.SimulateCommands)
+        {
+            Log.Info($"[{item.Name}] Would run: {fileName} {ProcessRunner.FormatArguments(createArguments)}");
+            result = new ProcessResult(0, "", "");
+        }
+        else
+        {
+            result = await ProcessRunner.RunAsync(fileName, createArguments, ct, TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+            if (result.Succeeded)
+                context.Journal.CommandRun($"Service {service.DisplayName}", fileName, undoArguments);
+        }
+
         if (result.Succeeded)
             context.Results.Info(item, $"Created the Windows service \"{service.DisplayName}\".");
         else
             context.Results.Warn(item, $"Could not create the service \"{service.DisplayName}\": {result.CombinedOutput.Trim()}");
     }
+
+    /// <summary>argv for <c>sc create</c>. The service name and display name are each one argument.</summary>
+    internal static string[] ServiceCreateArguments(string name, string displayName, string binPath, string start, string type) =>
+    [
+        "create", name, "binPath=", binPath, "start=", start, "type=", type, "DisplayName=", displayName,
+    ];
+
+    /// <summary>argv for <c>sc delete</c>. Undo stores this list encoded by <see cref="ProcessRunner.FormatArguments"/>.</summary>
+    internal static string[] ServiceDeleteArguments(string name) => ["delete", name];
 
     /// <summary>The same program folder, moved to the system drive if the old drive letter doesn't exist here.</summary>
     private static string TargetInstallPath(RestoreContext context, string installLocation)
