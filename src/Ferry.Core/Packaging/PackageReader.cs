@@ -235,9 +235,15 @@ public sealed class CaptureInfo
 
 public sealed class PackageEntry
 {
+    /// <summary>Content larger than this is spilled to a temp file when a caller has to reread it to learn the hash.</summary>
+    private const long ReplayInMemoryLimit = 32L << 20;
+
     private readonly PackageReader reader;
     private ContentStream? content;
     private bool consumed;
+    private byte[]? recordedHash;
+    private byte[]? replayBytes;
+    private string? replayPath;
 
     internal PackageEntry(EntryHeader header, PackageReader reader)
     {
@@ -257,12 +263,93 @@ public sealed class PackageEntry
     /// <summary>Content stream. Reading it to the end verifies the SHA-256 recorded by the writer.</summary>
     public Stream OpenContent()
     {
+        // A hash compare may have already read the bytes. Hand those back once, then forget them.
+        if (replayBytes is not null)
+        {
+            var bytes = replayBytes;
+            replayBytes = null;
+            return new MemoryStream(bytes, writable: false);
+        }
+        if (replayPath is not null)
+        {
+            var path = replayPath;
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16,
+                FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose);
+            replayPath = null;
+            return stream;
+        }
         if (!Header.HasContent)
             return Stream.Null;
         if (content is not null || consumed)
             throw new InvalidOperationException($"The content of {Name} has already been read.");
-        content = new ContentStream(reader, () => consumed = true);
+        content = CreateContentStream();
         return content;
+    }
+
+    /// <summary>
+    /// The SHA-256 the package stored after this entry. Reads the content when it has not been read yet and keeps
+    /// those bytes so <see cref="OpenContent"/> can still return them. Null when the entry carries no content hash.
+    /// </summary>
+    internal async Task<byte[]?> EnsureContentHashAsync(CancellationToken ct)
+    {
+        if (recordedHash is not null)
+            return recordedHash;
+        if (!Header.HasContent || consumed)
+            return null;
+
+        if (Header.Length > ReplayInMemoryLimit)
+        {
+            var path = Path.Combine(AppPaths.Temp, "replay-" + Guid.NewGuid().ToString("n"));
+            try
+            {
+                await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var input = OpenContent())
+                    await input.CopyToAsync(output, 1 << 20, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                TryDelete(path);
+                throw;
+            }
+            if (recordedHash is null)
+            {
+                TryDelete(path);
+                return null;
+            }
+            replayPath = path;
+            return recordedHash;
+        }
+
+        replayBytes = await ReadAllBytesAsync(ct).ConfigureAwait(false);
+        if (recordedHash is null)
+            replayBytes = null;
+        return recordedHash;
+    }
+
+    /// <summary>Drops bytes retained by <see cref="EnsureContentHashAsync"/> when they will not be written.</summary>
+    internal void ReleaseUnusedReplay()
+    {
+        replayBytes = null;
+        var path = replayPath;
+        replayPath = null;
+        if (path is not null)
+            TryDelete(path);
+    }
+
+    private ContentStream CreateContentStream() => new(reader, () => consumed = true, RememberHash);
+
+    private void RememberHash(byte[] hash) => recordedHash = hash;
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     public async Task<byte[]> ReadAllBytesAsync(CancellationToken ct)
@@ -279,13 +366,14 @@ public sealed class PackageEntry
     /// <summary>Discards whatever content has not been read.</summary>
     public async Task SkipAsync(CancellationToken ct)
     {
+        ReleaseUnusedReplay();
         if (consumed)
             return;
-        content ??= new ContentStream(reader, () => consumed = true);
+        content ??= CreateContentStream();
         await content.DrainAsync(ct).ConfigureAwait(false);
     }
 
-    private sealed class ContentStream(PackageReader reader, Action onEnd) : Stream
+    private sealed class ContentStream(PackageReader reader, Action onEnd, Action<byte[]> onHash) : Stream
     {
         private readonly IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         private byte[] chunk = [];
@@ -351,6 +439,7 @@ public sealed class PackageEntry
                     done = true;
                     throw new InvalidDataException("A file in the migration package failed its integrity check; the package is damaged.");
                 }
+                onHash(expected);
                 done = true;
                 chunkLength = position = 0;
                 ReturnBuffer();

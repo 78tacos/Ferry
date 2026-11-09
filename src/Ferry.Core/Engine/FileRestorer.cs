@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using Ferry.Core.Infrastructure;
 using Ferry.Core.Model;
@@ -136,7 +137,8 @@ public sealed class FileRestorer(RestoreContext context)
         string? temp = null;
         try
         {
-            var outcome = Decide(header, ref target, policy ?? context.Options.Conflicts);
+            FileOutcome outcome;
+            (outcome, target) = await Decide(header, target, policy ?? context.Options.Conflicts, entry, content, ct).ConfigureAwait(false);
             if (outcome is FileOutcome.SkippedIdentical or FileOutcome.SkippedExisting)
             {
                 if (entry is not null)
@@ -225,6 +227,8 @@ public sealed class FileRestorer(RestoreContext context)
             // Cancelled, damaged package, or a failed write: never leave a half-written file behind.
             if (temp is not null)
                 TryDelete(temp);
+            // A hash compare may have kept a copy of the entry. Drop it when the write never took it.
+            entry?.ReleaseUnusedReplay();
         }
     }
 
@@ -296,44 +300,97 @@ public sealed class FileRestorer(RestoreContext context)
             knownFolders.TryRemove(known, out _);
     }
 
-    private FileOutcome Decide(EntryHeader header, ref string target, ConflictPolicy policy)
+    private async Task<(FileOutcome Outcome, string Target)> Decide(EntryHeader header, string target, ConflictPolicy policy,
+        PackageEntry? entry, byte[]? content, CancellationToken ct)
     {
         if (!File.Exists(target))
-            return FileOutcome.Written;
+            return (FileOutcome.Written, target);
+        var hashes = new ContentHashLookup(entry, content);
         var existing = new FileInfo(target);
         var incomingTime = ModifiedUtc(header);
-        if (IsSame(existing, header))
-            return FileOutcome.SkippedIdentical;
+        if (await IsSame(existing, header, hashes, ct).ConfigureAwait(false))
+            return (FileOutcome.SkippedIdentical, target);
 
         switch (policy)
         {
             case ConflictPolicy.Skip:
-                return FileOutcome.SkippedExisting;
+                return (FileOutcome.SkippedExisting, target);
             case ConflictPolicy.Overwrite:
-                return FileOutcome.Replaced;
+                return (FileOutcome.Replaced, target);
             case ConflictPolicy.OverwriteIfNewer:
-                return incomingTime > existing.LastWriteTimeUtc.AddSeconds(2) ? FileOutcome.Replaced : FileOutcome.SkippedExisting;
+                return (incomingTime > existing.LastWriteTimeUtc.AddSeconds(2) ? FileOutcome.Replaced : FileOutcome.SkippedExisting, target);
             default:
                 // Re-running a migration must not pile up copies: an identical "(from OLDPC)" file counts as done.
                 for (var n = 1; n < 100; n++)
                 {
                     var candidate = AlternateName(target, context.SourceComputer, n);
                     if (!File.Exists(candidate))
-                    {
-                        target = candidate;
-                        return FileOutcome.KeptBoth;
-                    }
-                    if (IsSame(new FileInfo(candidate), header))
-                        return FileOutcome.SkippedIdentical;
+                        return (FileOutcome.KeptBoth, candidate);
+                    if (await IsSame(new FileInfo(candidate), header, hashes, ct).ConfigureAwait(false))
+                        return (FileOutcome.SkippedIdentical, target);
                 }
-                return FileOutcome.SkippedExisting;
+                return (FileOutcome.SkippedExisting, target);
         }
     }
 
     private static DateTime ModifiedUtc(EntryHeader header) => new(header.ModifiedTicks, DateTimeKind.Utc);
 
-    private static bool IsSame(FileInfo existing, EntryHeader header) =>
-        existing.Length == header.Length && Math.Abs((existing.LastWriteTimeUtc - ModifiedUtc(header)).TotalSeconds) <= 2;
+    /// <summary>
+    /// Same length and a modified time within two seconds (FAT's resolution). That pair is only a pre-filter:
+    /// when the package recorded a SHA-256, the existing bytes have to match it too. With no hash, length and
+    /// time still count as the same file.
+    /// </summary>
+    private static async Task<bool> IsSame(FileInfo existing, EntryHeader header, ContentHashLookup hashes, CancellationToken ct)
+    {
+        if (existing.Length != header.Length || Math.Abs((existing.LastWriteTimeUtc - ModifiedUtc(header)).TotalSeconds) > 2)
+            return false;
+
+        byte[] existingHash;
+        try
+        {
+            existingHash = HashFile(existing.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The bytes couldn't be checked. Let the conflict policy run instead of skipping a file that may differ.
+            return false;
+        }
+
+        var packageHash = await hashes.GetAsync(ct).ConfigureAwait(false);
+        if (packageHash is null)
+            return true;
+        if (!existingHash.AsSpan().SequenceEqual(packageHash))
+            return false;
+        hashes.ReleaseReplay();
+        return true;
+    }
+
+    private static byte[] HashFile(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16, FileOptions.SequentialScan);
+        return SHA256.HashData(stream);
+    }
+
+    /// <summary>The entry's recorded SHA-256, read at most once. In-memory content is hashed directly; it was already checked against that record.</summary>
+    private sealed class ContentHashLookup(PackageEntry? entry, byte[]? content)
+    {
+        private byte[]? hash;
+        private bool resolved;
+
+        public async Task<byte[]?> GetAsync(CancellationToken ct)
+        {
+            if (resolved)
+                return hash;
+            if (content is not null)
+                hash = SHA256.HashData(content);
+            else if (entry is not null)
+                hash = await entry.EnsureContentHashAsync(ct).ConfigureAwait(false);
+            resolved = true;
+            return hash;
+        }
+
+        public void ReleaseReplay() => entry?.ReleaseUnusedReplay();
+    }
 
     /// <summary>"Report.docx" → "Report (from OLDPC).docx", then "Report (from OLDPC 2).docx" and so on.</summary>
     internal static string AlternateName(string path, string sourceComputer, int n = 1)

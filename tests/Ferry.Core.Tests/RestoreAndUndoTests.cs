@@ -132,6 +132,22 @@ public sealed class RestoreAndUndoTests : IDisposable
     }
 
     [Fact]
+    public async Task SameSizeAndTimestampWithDifferentBytesIsOverwritten()
+    {
+        // Length and a timestamp within two seconds used to count as the same file, so Overwrite kept the old bytes.
+        var existing = Existing("collision.txt", "aaaa", OldTime);
+        Assert.InRange(Math.Abs((File.GetLastWriteTimeUtc(existing) - OldTime).TotalSeconds), 0, 2);
+        var (context, _, results, item) = Context(ConflictPolicy.Overwrite);
+
+        var outcome = await context.Files.RestoreAsync(await Entry("bbbb", OldTime), item, existing, default);
+
+        Assert.Equal(FileOutcome.Replaced, outcome);
+        Assert.Equal("bbbb", File.ReadAllText(existing));
+        Assert.Equal(0, results.For(item).FilesSkipped);
+        Assert.Equal(1, results.For(item).FilesDone);
+    }
+
+    [Fact]
     public async Task DryRunChangesNothing()
     {
         var (context, _, results, item) = Context(ConflictPolicy.Overwrite, dryRun: true);
