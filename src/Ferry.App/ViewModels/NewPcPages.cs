@@ -70,28 +70,52 @@ public sealed class WaitViewModel : PageViewModel
     {
         if (cts is not null)
             return;
-        cts = CancellationTokenSource.CreateLinkedTokenSource(Flow.Cancellation.Token);
+        var pageCts = CancellationTokenSource.CreateLinkedTokenSource(Flow.Cancellation.Token);
+        cts = pageCts;
+        var flow = Flow;
+        // Back replaces Flow before this method resumes. DisposeAsync also yields, so check again after each wait.
+        bool StillOnPage() => !pageCts.IsCancellationRequested && ReferenceEquals(Main.Flow, flow);
         try
         {
-            Flow.Receiver = NetworkReceiver.Start(userLabel: UserProfiles.GetInteractiveAccountName());
-            Code = Flow.Receiver.Code;
-            AddressText = string.Join(" or ", Flow.Receiver.Addresses.Take(2));
+            // Start blocks in netsh while it opens the firewall rule. Keep that off the dispatcher.
+            // It also waits out an abandoned receiver so that close cannot delete this page's rule.
+            var receiver = await Task.Run(() => NetworkReceiver.Start(userLabel: UserProfiles.GetInteractiveAccountName()));
+            if (!StillOnPage())
+            {
+                // Not stored on the flow, so GoHome will not close it.
+                await receiver.DisposeAsync();
+                return;
+            }
+
+            flow.Receiver = receiver;
+            Code = receiver.Code;
+            AddressText = string.Join(" or ", receiver.Addresses.Take(2));
             OnPropertyChanged(nameof(AddressText));
-            Flow.Receiver.CodeChanged += newCode => OnUi(() =>
+            receiver.CodeChanged += newCode => OnUi(() =>
             {
                 Code = newCode;
                 Status = "Someone typed a wrong code, so it has changed. Use the new code below.";
             });
 
-            var session = await Task.Run(() => Flow.Receiver.WaitForSenderAsync(cts.Token));
-            Flow.ReceiverSession = session;
+            var session = await Task.Run(() => receiver.WaitForSenderAsync(pageCts.Token));
+            if (!StillOnPage())
+            {
+                // Not on the flow yet, so GoHome will not close this paired connection.
+                await session.DisposeAsync();
+                return;
+            }
+            flow.ReceiverSession = session;
             IsConnected = true;
             Status = "Waiting for the old PC to finish scanning…";
-            var inventory = await Task.Run(() => session.ReceiveInventoryAsync(s => OnUi(() => Status = s), cts.Token));
-            Flow.Inventory = inventory;
+            var inventory = await Task.Run(() => session.ReceiveInventoryAsync(s => OnUi(() => Status = s), pageCts.Token));
+            if (!StillOnPage())
+                return;
+            flow.Inventory = inventory;
             // No more connections needed: stop listening and close the firewall opening.
-            await Flow.Receiver.DisposeAsync();
-            Flow.Receiver = null;
+            await receiver.DisposeAsync();
+            if (!StillOnPage())
+                return;
+            flow.Receiver = null;
             Main.Navigate(new SelectViewModel(Main, SelectMode.Receive, inventory, Selection.Defaults(inventory)), remember: false);
         }
         catch (OperationCanceledException)

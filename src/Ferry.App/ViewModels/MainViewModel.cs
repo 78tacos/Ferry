@@ -49,14 +49,68 @@ public sealed class Flow : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await Cancellation.CancelAsync();
-        if (SenderSession is not null)
-            await SenderSession.DisposeAsync();
-        if (ReceiverSession is not null)
-            await ReceiverSession.DisposeAsync();
-        if (Receiver is not null)
-            await Receiver.DisposeAsync();
-        Cancellation.Dispose();
+        // Stay off the dispatcher after the first yield. The receiver owns the listen gate,
+        // so a failure while dropping the paired connection must not skip its close.
+        Exception? error = null;
+        try
+        {
+            try
+            {
+                await Cancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+
+            if (SenderSession is not null)
+            {
+                try
+                {
+                    await SenderSession.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    error ??= ex;
+                }
+            }
+
+            if (ReceiverSession is not null)
+            {
+                try
+                {
+                    await ReceiverSession.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    error ??= ex;
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Receiver is not null)
+                    await Receiver.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                error ??= ex;
+            }
+
+            try
+            {
+                Cancellation.Dispose();
+            }
+            catch (Exception ex)
+            {
+                error ??= ex;
+            }
+        }
+
+        if (error is not null)
+            throw error;
     }
 }
 
@@ -132,7 +186,7 @@ public sealed class MainViewModel : Observable
         UpdateSteps();
         try
         {
-            await old.DisposeAsync();
+            await old.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

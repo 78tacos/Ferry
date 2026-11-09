@@ -27,18 +27,29 @@ public sealed class SelectionMessage
 /// </summary>
 public sealed class NetworkReceiver : IAsyncDisposable
 {
+    /// <summary>
+    /// The firewall rule name and the discovery port are process-wide. Hold this from a successful
+    /// <see cref="Start"/> until that receiver finishes closing, so an abandoned receiver cannot delete
+    /// a newer session's rule or keep the port.
+    /// </summary>
+    private static readonly SemaphoreSlim sharedListen = new(1, 1);
+
     private readonly TcpListener listener;
     private readonly DiscoveryResponder? discovery;
     private readonly TemporaryFirewallRule? firewall;
     private readonly string? fixedCode;
+    private readonly bool ownsSharedListen;
     private readonly KeepAwake awake = KeepAwake.Start("Ferry is waiting for the old PC to connect");
+    private readonly object disposeGate = new();
+    private Task? disposing;
 
-    private NetworkReceiver(TcpListener listener, DiscoveryResponder? discovery, TemporaryFirewallRule? firewall, string? fixedCode)
+    private NetworkReceiver(TcpListener listener, DiscoveryResponder? discovery, TemporaryFirewallRule? firewall, string? fixedCode, bool ownsSharedListen)
     {
         this.listener = listener;
         this.discovery = discovery;
         this.firewall = firewall;
         this.fixedCode = fixedCode;
+        this.ownsSharedListen = ownsSharedListen;
         Code = fixedCode is null ? PairingCode.Generate() : PairingCode.Display(fixedCode);
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
     }
@@ -57,22 +68,52 @@ public sealed class NetworkReceiver : IAsyncDisposable
     {
         var address = bindAddress ?? IPAddress.Any;
         var loopbackOnly = IPAddress.IsLoopback(address);
-        var firewall = loopbackOnly ? null : TemporaryFirewallRule.Open();
-        TcpListener listener;
+        // Loopback tests skip the shared rule and the discovery port, so they do not take the gate.
+        var holdsShared = false;
+        if (!loopbackOnly)
+        {
+            sharedListen.Wait();
+            holdsShared = true;
+        }
+
+        TemporaryFirewallRule? firewall = null;
+        TcpListener? listener = null;
+        DiscoveryResponder? discovery = null;
         try
         {
+            firewall = loopbackOnly ? null : TemporaryFirewallRule.Open();
             listener = new TcpListener(address, port);
-            listener.Start();
+            try
+            {
+                listener.Start();
+            }
+            catch (SocketException)
+            {
+                // The usual port is taken; any port works because discovery tells the old PC which one.
+                var failed = listener;
+                listener = null;
+                StopListener(failed);
+                listener = new TcpListener(address, 0);
+                listener.Start();
+            }
+
+            var actualPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Log.Info($"Waiting for the old PC on {address}:{actualPort}");
+            discovery = loopbackOnly ? null : new DiscoveryResponder(actualPort, userLabel);
+            var receiver = new NetworkReceiver(listener, discovery, firewall, fixedCode, holdsShared);
+            holdsShared = false;
+            return receiver;
         }
-        catch (SocketException)
+        catch
         {
-            // The usual port is taken; any port works because discovery tells the old PC which one.
-            listener = new TcpListener(address, 0);
-            listener.Start();
+            AbandonStart(discovery, listener, firewall);
+            throw;
         }
-        var actualPort = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Log.Info($"Waiting for the old PC on {address}:{actualPort}");
-        return new NetworkReceiver(listener, loopbackOnly ? null : new DiscoveryResponder(actualPort, userLabel), firewall, fixedCode);
+        finally
+        {
+            if (holdsShared)
+                sharedListen.Release();
+        }
     }
 
     public async Task<ReceiverSession> WaitForSenderAsync(CancellationToken ct)
@@ -112,11 +153,72 @@ public sealed class NetworkReceiver : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
-        listener.Stop();
-        discovery?.Dispose();
-        firewall?.Dispose();
-        awake.Dispose();
-        return ValueTask.CompletedTask;
+        // Going home can dispose the flow while this page is already closing the receiver.
+        lock (disposeGate)
+            return new ValueTask(disposing ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        try
+        {
+            // Each step is independent: a failure to stop the listener must not skip freeing the discovery port
+            // or the shared rule, and the next Start waits until this finally releases the gate.
+            StopListener(listener);
+            try
+            {
+                discovery?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"Stopping discovery: {ex.Message}");
+            }
+            // Closing the rule waits on netsh. Hop off first so a completed await cannot run it on the dispatcher.
+            if (firewall is not null)
+                await Task.Run(() => firewall.DisposeAsync().AsTask()).ConfigureAwait(false);
+        }
+        finally
+        {
+            awake.Dispose();
+            if (ownsSharedListen)
+                sharedListen.Release();
+        }
+    }
+
+    /// <summary>Drops a receiver that never started. The original exception is rethrown by the caller.</summary>
+    private static void AbandonStart(DiscoveryResponder? discovery, TcpListener? listener, TemporaryFirewallRule? firewall)
+    {
+        try
+        {
+            discovery?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Stopping discovery: {ex.Message}");
+        }
+        StopListener(listener);
+        try
+        {
+            firewall?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Closing the firewall rule: {ex.Message}");
+        }
+    }
+
+    private static void StopListener(TcpListener? listener)
+    {
+        if (listener is null)
+            return;
+        try
+        {
+            listener.Stop();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Stopping the listener: {ex.Message}");
+        }
     }
 }
 
