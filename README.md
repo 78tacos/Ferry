@@ -16,7 +16,7 @@ with a friendly wizard for people and a command line for IT to script it.
 | **Programs** | Everything in Add/Remove Programs and the Microsoft Store | **Reinstalled fresh with winget** by default (matched by winget, or by a built-in list of well-known apps). Optionally **copied as-is** — program folder, registry keys, file associations, COM classes, Start menu shortcuts and services (experimental). A full list goes in the report either way. |
 | **Program settings** | Each vendor folder in AppData\Roaming (and, if ticked, AppData\Local) and each vendor key in `HKCU\Software` | Paths inside settings files and registry values are rewritten for the new user. |
 | **Windows settings** | Wi-Fi networks (with passwords), shared and network printers, default printer, mapped drives, wallpaper, colors/theme, mouse/keyboard/touchpad, region and keyboard layouts, File Explorer and taskbar options, taskbar/Start pins, accessibility, fonts, user and system environment variables, default apps (listed for you to set) | Applied to the new user; system parts need administrator. |
-| **Browsers & email** | Chrome, Edge, Brave, Vivaldi, Opera, Firefox profiles; Thunderbird | Bookmarks, history, extensions and settings. Firefox also brings saved passwords. |
+| **Browsers & email** | Chrome, Edge, Brave, Vivaldi, Chromium, Opera, Firefox profiles; Thunderbird | Bookmarks, history, extensions and settings. Firefox also brings saved passwords. |
 | **Office & Outlook** | Signatures, `.pst` data files, templates (Normal.dotm), custom dictionaries/AutoCorrect, Excel/Word startup files (PERSONAL.XLSB), ribbon customizations, Sticky Notes | Into the same places; the report says where PSTs went so they can be opened in Outlook. |
 
 ## How it works
