@@ -100,7 +100,9 @@ public sealed class FoldersMigrator : MigratorBase
         if (relative is null)
             return;
         var root = TargetRoot(context, item);
-        var logicalPath = Path.Combine(root, relative);
+        var logicalPath = await JoinUnderAsync(context, item, entry, root, relative, ct).ConfigureAwait(false);
+        if (logicalPath is null)
+            return;
         context.Status(item, logicalPath);
         if (entry.Kind == EntryKind.Directory)
             context.Files.RestoreDirectory(entry, logicalPath);

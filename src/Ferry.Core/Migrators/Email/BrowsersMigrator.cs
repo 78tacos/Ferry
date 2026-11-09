@@ -285,14 +285,20 @@ public sealed class BrowsersMigrator : MigratorBase
                     return;
                 }
                 var (_, relative) = EntryNames.SplitFirst(rest);
-                var path = Path.Combine(FirefoxRoot(context, target), "Profiles", targetDir, relative);
+                var path = await JoinUnderAsync(context, item, entry, Path.Combine(FirefoxRoot(context, target), "Profiles"),
+                    Path.Combine(targetDir, relative), ct).ConfigureAwait(false);
+                if (path is null)
+                    return;
                 await RestorePathAsync(context, item, entry, path, remap, ct).ConfigureAwait(false);
                 break;
             }
             case ThunderbirdKey:
             {
                 var relative = EntryNames.After(entry.Name, Entry(item.UserSid!, ThunderbirdKey))!;
-                var path = Path.Combine(context.TargetFolder(target, KnownFolders.RoamingAppData), "Thunderbird", relative);
+                var path = await JoinUnderAsync(context, item, entry,
+                    Path.Combine(context.TargetFolder(target, KnownFolders.RoamingAppData), "Thunderbird"), relative, ct).ConfigureAwait(false);
+                if (path is null)
+                    return;
                 await RestorePathAsync(context, item, entry, path, remap, ct).ConfigureAwait(false);
                 break;
             }
@@ -306,7 +312,10 @@ public sealed class BrowsersMigrator : MigratorBase
                     MergeLocalState(context, item, entry, await entry.ReadAllBytesAsync(ct).ConfigureAwait(false), userData, browser, targetDir);
                     return;
                 }
-                var path = browser.SingleProfile ? Path.Combine(userData, relative) : Path.Combine(userData, targetDir, relative);
+                var path = await JoinUnderAsync(context, item, entry, userData,
+                    browser.SingleProfile ? relative : Path.Combine(targetDir, relative), ct).ConfigureAwait(false);
+                if (path is null)
+                    return;
                 await RestorePathAsync(context, item, entry, path, remap, ct).ConfigureAwait(false);
                 break;
             }

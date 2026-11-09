@@ -183,7 +183,9 @@ public sealed class AppSettingsMigrator : MigratorBase
         }
 
         var baseFolder = kind == LocalKind ? KnownFolders.LocalAppData : KnownFolders.RoamingAppData;
-        var logicalPath = Path.Combine(context.TargetFolder(target, baseFolder), tail);
+        var logicalPath = await JoinUnderAsync(context, item, entry, context.TargetFolder(target, baseFolder), tail, ct).ConfigureAwait(false);
+        if (logicalPath is null)
+            return;
         context.Status(item, logicalPath);
         if (entry.Kind == EntryKind.Directory)
             context.Files.RestoreDirectory(entry, logicalPath);

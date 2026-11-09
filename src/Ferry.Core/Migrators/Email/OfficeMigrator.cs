@@ -181,7 +181,10 @@ public sealed class OfficeMigrator : MigratorBase
         }
 
         var set = group.Files[int.Parse(part, System.Globalization.CultureInfo.InvariantCulture)];
-        var path = Path.Combine(context.TargetFolder(target, set.Base), set.RelativeDir, relative);
+        var path = await JoinUnderAsync(context, item, entry, Path.Combine(context.TargetFolder(target, set.Base), set.RelativeDir), relative, ct)
+            .ConfigureAwait(false);
+        if (path is null)
+            return;
         context.Status(item, path);
         var outcome = await context.Files.RestoreAsync(entry, item, path, ct, context.RemapperFor(item), group.Policy).ConfigureAwait(false);
         if (group.Key == "pst" && outcome is FileOutcome.Written or FileOutcome.KeptBoth or FileOutcome.Replaced or FileOutcome.SkippedIdentical)
