@@ -73,13 +73,16 @@ public sealed class WaitViewModel : PageViewModel
         var pageCts = CancellationTokenSource.CreateLinkedTokenSource(Flow.Cancellation.Token);
         cts = pageCts;
         var flow = Flow;
+        // Back replaces Flow before this method resumes. DisposeAsync also yields, so check again after each wait.
+        bool StillOnPage() => !pageCts.IsCancellationRequested && ReferenceEquals(Main.Flow, flow);
         try
         {
             // Start blocks in netsh while it opens the firewall rule. Keep that off the dispatcher.
+            // It also waits out an abandoned receiver so that close cannot delete this page's rule.
             var receiver = await Task.Run(() => NetworkReceiver.Start(userLabel: UserProfiles.GetInteractiveAccountName()));
-            if (pageCts.IsCancellationRequested)
+            if (!StillOnPage())
             {
-                // The page was left before the receiver was stored. Closing it removes the rule.
+                // Not stored on the flow, so GoHome will not close it.
                 await receiver.DisposeAsync();
                 return;
             }
@@ -95,13 +98,23 @@ public sealed class WaitViewModel : PageViewModel
             });
 
             var session = await Task.Run(() => receiver.WaitForSenderAsync(pageCts.Token));
+            if (!StillOnPage())
+            {
+                // Not on the flow yet, so GoHome will not close this paired connection.
+                await session.DisposeAsync();
+                return;
+            }
             flow.ReceiverSession = session;
             IsConnected = true;
             Status = "Waiting for the old PC to finish scanning…";
             var inventory = await Task.Run(() => session.ReceiveInventoryAsync(s => OnUi(() => Status = s), pageCts.Token));
+            if (!StillOnPage())
+                return;
             flow.Inventory = inventory;
             // No more connections needed: stop listening and close the firewall opening.
             await receiver.DisposeAsync();
+            if (!StillOnPage())
+                return;
             flow.Receiver = null;
             Main.Navigate(new SelectViewModel(Main, SelectMode.Receive, inventory, Selection.Defaults(inventory)), remember: false);
         }

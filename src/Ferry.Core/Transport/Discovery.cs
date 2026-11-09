@@ -45,8 +45,19 @@ public sealed class DiscoveryResponder : IDisposable
             udp = null;
             return;
         }
-        var announcement = Json.ToBytes(new PeerAnnouncement("ferry", 1, Environment.MachineName, transferPort, SystemInfo.Collect().OsSummary, user));
-        _ = Task.Run(() => RespondLoopAsync(announcement, cts.Token));
+
+        try
+        {
+            var announcement = Json.ToBytes(new PeerAnnouncement("ferry", 1, Environment.MachineName, transferPort, SystemInfo.Collect().OsSummary, user));
+            _ = Task.Run(() => RespondLoopAsync(announcement, cts.Token));
+        }
+        catch
+        {
+            udp?.Dispose();
+            udp = null;
+            cts.Dispose();
+            throw;
+        }
     }
 
     private async Task RespondLoopAsync(byte[] announcement, CancellationToken ct)
