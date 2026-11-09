@@ -49,13 +49,14 @@ public sealed class Flow : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await Cancellation.CancelAsync();
+        // Stay off the dispatcher after the first yield. The receiver's firewall close waits on netsh.
+        await Cancellation.CancelAsync().ConfigureAwait(false);
         if (SenderSession is not null)
-            await SenderSession.DisposeAsync();
+            await SenderSession.DisposeAsync().ConfigureAwait(false);
         if (ReceiverSession is not null)
-            await ReceiverSession.DisposeAsync();
+            await ReceiverSession.DisposeAsync().ConfigureAwait(false);
         if (Receiver is not null)
-            await Receiver.DisposeAsync();
+            await Receiver.DisposeAsync().ConfigureAwait(false);
         Cancellation.Dispose();
     }
 }
@@ -132,7 +133,7 @@ public sealed class MainViewModel : Observable
         UpdateSteps();
         try
         {
-            await old.DisposeAsync();
+            await old.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

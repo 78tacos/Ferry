@@ -85,10 +85,13 @@ public static class ProcessRunner
             }
             if (ct.IsCancellationRequested)
                 throw;
-            return new ProcessResult(-2, await SafeAwait(stdout), $"{psi.FileName} timed out after {timeout}.");
+            return new ProcessResult(-2, await SafeAwait(stdout).ConfigureAwait(false), $"{psi.FileName} timed out after {timeout}.");
         }
 
-        var result = new ProcessResult(process.ExitCode, await SafeAwait(stdout), await SafeAwait(stderr));
+        var result = new ProcessResult(
+            process.ExitCode,
+            await SafeAwait(stdout).ConfigureAwait(false),
+            await SafeAwait(stderr).ConfigureAwait(false));
         if (!result.Succeeded)
             Log.Debug($"{Path.GetFileName(psi.FileName)} exited {result.ExitCode}: {Truncate(result.CombinedOutput, 2000)}");
         return result;
@@ -98,6 +101,7 @@ public static class ProcessRunner
     {
         try
         {
+            // GetResult callers (the firewall rule) deadlock if this posts back to a blocked dispatcher.
             return await task.ConfigureAwait(false);
         }
         catch

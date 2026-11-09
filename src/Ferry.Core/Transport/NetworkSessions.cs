@@ -32,6 +32,8 @@ public sealed class NetworkReceiver : IAsyncDisposable
     private readonly TemporaryFirewallRule? firewall;
     private readonly string? fixedCode;
     private readonly KeepAwake awake = KeepAwake.Start("Ferry is waiting for the old PC to connect");
+    private readonly object disposeGate = new();
+    private Task? disposing;
 
     private NetworkReceiver(TcpListener listener, DiscoveryResponder? discovery, TemporaryFirewallRule? firewall, string? fixedCode)
     {
@@ -112,11 +114,19 @@ public sealed class NetworkReceiver : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        // Going home can dispose the flow while this page is already closing the receiver.
+        lock (disposeGate)
+            return new ValueTask(disposing ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
+    {
         listener.Stop();
         discovery?.Dispose();
-        firewall?.Dispose();
+        // Closing the rule waits on netsh. Hop off first so a completed await cannot run it on the dispatcher.
+        if (firewall is not null)
+            await Task.Run(() => firewall.DisposeAsync().AsTask()).ConfigureAwait(false);
         awake.Dispose();
-        return ValueTask.CompletedTask;
     }
 }
 

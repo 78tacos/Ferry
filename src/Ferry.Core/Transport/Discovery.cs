@@ -208,36 +208,44 @@ public static class LocalAddresses
 }
 
 /// <summary>Opens Windows Firewall for Ferry on the new PC while it waits, and closes it again afterwards.</summary>
-public sealed class TemporaryFirewallRule : IDisposable
+public sealed class TemporaryFirewallRule : IDisposable, IAsyncDisposable
 {
     private const string RuleName = "Ferry migration (temporary)";
     private readonly bool created;
 
     private TemporaryFirewallRule(bool created) => this.created = created;
 
+    /// <summary>Deletes a leftover rule, then adds one for this process. Blocks until netsh returns.</summary>
     public static TemporaryFirewallRule Open()
     {
         if (!Elevation.IsAdministrator || Environment.ProcessPath is not { } exe)
             return new TemporaryFirewallRule(false);
+        return new TemporaryFirewallRule(OpenAsync(exe).GetAwaiter().GetResult());
+    }
+
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync() => created ? CloseAsync() : ValueTask.CompletedTask;
+
+    private static async Task<bool> OpenAsync(string exe)
+    {
         var netsh = ProcessRunner.System32("netsh.exe");
         // Remove a leftover from a run that crashed, then add a program rule (covers both TCP and UDP).
-        ProcessRunner.RunRawAsync(netsh, $"advfirewall firewall delete rule name=\"{RuleName}\"", CancellationToken.None).GetAwaiter().GetResult();
-        var result = ProcessRunner.RunRawAsync(netsh,
+        await ProcessRunner.RunRawAsync(netsh, $"advfirewall firewall delete rule name=\"{RuleName}\"", CancellationToken.None).ConfigureAwait(false);
+        var result = await ProcessRunner.RunRawAsync(netsh,
             $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any",
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None).ConfigureAwait(false);
         if (!result.Succeeded)
             Log.Warn($"Could not open the firewall: {result.CombinedOutput.Trim()}");
         else
             Log.Info("Opened Windows Firewall for Ferry while waiting for the old PC");
-        return new TemporaryFirewallRule(result.Succeeded);
+        return result.Succeeded;
     }
 
-    public void Dispose()
+    private static async ValueTask CloseAsync()
     {
-        if (!created)
-            return;
-        ProcessRunner.RunRawAsync(ProcessRunner.System32("netsh.exe"), $"advfirewall firewall delete rule name=\"{RuleName}\"", CancellationToken.None)
-            .GetAwaiter().GetResult();
+        await ProcessRunner.RunRawAsync(ProcessRunner.System32("netsh.exe"), $"advfirewall firewall delete rule name=\"{RuleName}\"", CancellationToken.None)
+            .ConfigureAwait(false);
         Log.Info("Closed the temporary firewall opening");
     }
 }
