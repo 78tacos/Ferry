@@ -43,19 +43,6 @@ public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) 
     public void Execute(object? parameter) => execute();
 }
 
-public sealed class RelayCommand<T>(Action<T?> execute, Func<T?, bool>? canExecute = null) : ICommand
-{
-    public event EventHandler? CanExecuteChanged
-    {
-        add => CommandManager.RequerySuggested += value;
-        remove => CommandManager.RequerySuggested -= value;
-    }
-
-    public bool CanExecute(object? parameter) => canExecute?.Invoke(parameter is T t ? t : default) ?? true;
-
-    public void Execute(object? parameter) => execute(parameter is T t ? t : default);
-}
-
 /// <summary>An async command that disables itself while running and reports failures through <see cref="Failed"/>.</summary>
 public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
 {
