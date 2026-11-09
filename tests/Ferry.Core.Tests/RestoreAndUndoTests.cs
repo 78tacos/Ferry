@@ -96,6 +96,63 @@ public sealed class RestoreAndUndoTests : IDisposable
     }
 
     [Fact]
+    public async Task CrossVolumeFileReplaceCopiesTheOriginalAndUndoRestoresIt()
+    {
+        var existing = Existing("xvol-settings.ini", "original", NewTime);
+        var (context, journal, _, item) = Context(ConflictPolicy.Overwrite);
+        journal.UseCrossVolumeCopy((source, destination) =>
+        {
+            Assert.Equal("original", File.ReadAllText(source));
+            Assert.False(File.Exists(destination));
+        });
+
+        Assert.Equal(FileOutcome.Replaced, await context.Files.RestoreAsync(await Entry("migrated", OldTime), item, existing, default));
+        Assert.Equal("migrated", File.ReadAllText(existing));
+        var backup = Directory.EnumerateFiles(Path.Combine(journal.Directory, "backup")).Single();
+        Assert.Equal("original", File.ReadAllText(backup));
+
+        journal.Dispose();
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+        Assert.False(report.HasFailures);
+        Assert.Equal("original", File.ReadAllText(existing));
+        Assert.False(File.Exists(backup));
+    }
+
+    [Fact]
+    public async Task CrossVolumeDirectoryReplaceCopiesTheOriginalAndUndoRestoresIt()
+    {
+        var dir = Path.Combine(folder, "xvol-profile");
+        Directory.CreateDirectory(Path.Combine(dir, "Local"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "Preferences"), "original");
+        await File.WriteAllTextAsync(Path.Combine(dir, "Local", "Cookies"), "session");
+
+        var journal = RollbackJournal.Create("OLDPC", []);
+        var copied = new List<string>();
+        journal.UseCrossVolumeCopy((source, _) =>
+        {
+            Assert.True(File.Exists(source));
+            copied.Add(source);
+        });
+        journal.BackupDirectory(dir);
+
+        Assert.False(Directory.Exists(dir));
+        Assert.Equal(2, copied.Count);
+        var saved = Directory.EnumerateDirectories(Path.Combine(journal.Directory, "backup")).Single();
+        Assert.False(File.Exists(RollbackJournal.IncompleteBackupMarker(saved)));
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(saved, "Preferences")));
+        Assert.Equal("session", await File.ReadAllTextAsync(Path.Combine(saved, "Local", "Cookies")));
+
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "Preferences"), "migrated");
+        journal.Dispose();
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+        Assert.False(report.HasFailures);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(dir, "Preferences")));
+        Assert.Equal("session", await File.ReadAllTextAsync(Path.Combine(dir, "Local", "Cookies")));
+        Assert.False(Directory.Exists(saved));
+    }
+
+    [Fact]
     public async Task OverwriteBacksUpTheOriginalForUndo()
     {
         var existing = Existing("settings.ini", "original", NewTime);

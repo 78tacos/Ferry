@@ -40,14 +40,26 @@ public static class UndoEngine
     }
 
     /// <summary>Reverses every recorded change, newest first. Keeps going past individual failures.</summary>
-    public static async Task<MigrationReport> UndoAsync(string id, IProgress<MigrationProgress>? progress, CancellationToken ct)
+    public static Task<MigrationReport> UndoAsync(string id, IProgress<MigrationProgress>? progress, CancellationToken ct) =>
+        UndoAsync(id, progress, ct, platformServices: true);
+
+    /// <param name="platformServices">
+    /// False only in tests that run where kernel32 cannot load. Skips the power request and the machine summary,
+    /// neither of which reverses the journal. Production undo always passes true.
+    /// </param>
+    internal static async Task<MigrationReport> UndoAsync(string id, IProgress<MigrationProgress>? progress, CancellationToken ct, bool platformServices)
     {
         var info = Find(id) ?? throw new InvalidOperationException($"No undo data with id {id}.");
         if (info.Status == UndoStatus.Undone)
             throw new InvalidOperationException("This migration has already been undone.");
 
-        using var awake = KeepAwake.Start("Ferry is undoing a migration");
-        var report = new MigrationReport { Kind = OperationKind.Undo, Target = SystemInfo.Collect(), UndoId = id };
+        using IDisposable? awake = platformServices ? KeepAwake.Start("Ferry is undoing a migration") : null;
+        var report = new MigrationReport
+        {
+            Kind = OperationKind.Undo,
+            Target = platformServices ? SystemInfo.Collect() : new MachineInfo(),
+            UndoId = id,
+        };
         var files = new ItemResult { ItemId = "undo:files", Name = "Files and folders", Category = MigrationCategory.Files };
         var registry = new ItemResult { ItemId = "undo:registry", Name = "Registry settings", Category = MigrationCategory.WindowsSettings };
         var commands = new ItemResult { ItemId = "undo:commands", Name = "Wi-Fi, printers, apps and other changes", Category = MigrationCategory.WindowsSettings };
@@ -109,7 +121,7 @@ public static class UndoEngine
                             {
                                 DeleteFile(r.Path!);
                                 Directory.CreateDirectory(Path.GetDirectoryName(r.Path!)!);
-                                File.Move(saved, r.Path!, overwrite: true);
+                                RollbackJournal.MoveFile(saved, r.Path!);
                             }
                             files.FilesDone++;
                             break;
@@ -120,8 +132,11 @@ public static class UndoEngine
                             break;
                         case JournalRecord.DirReplacedOp:
                         {
+                            // Same rule as a file: the record is written before the original is moved aside. A missing
+                            // backup, or one whose cross-volume copy did not finish, is not authoritative. Leave the
+                            // surviving original alone.
                             var saved = Path.Combine(backup, r.Backup!);
-                            if (Directory.Exists(saved))
+                            if (RollbackJournal.IsCompleteDirectoryBackup(saved))
                             {
                                 if (Directory.Exists(r.Path))
                                     Directory.Delete(r.Path!, recursive: true);

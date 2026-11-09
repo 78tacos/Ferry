@@ -59,6 +59,8 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
     private readonly string backupDirectory;
     private readonly UndoInfo info;
     private int backupCounter;
+    private bool crossVolumeCopy;
+    private Action<string, string>? beforeCrossVolumeCopy;
 
     private RollbackJournal(UndoInfo info)
     {
@@ -92,7 +94,8 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
 
     /// <remarks>
     /// The record goes in first: if the move then fails or the process dies, undo finds no backup and leaves
-    /// whatever is at the path (the original) alone.
+    /// whatever is at the path (the original) alone. A file on another volume is copied, and the original is
+    /// deleted only after that copy has been published under its backup name.
     /// </remarks>
     public void BackupFile(string path)
     {
@@ -102,7 +105,7 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
             var backup = Path.Combine(backupDirectory, name);
             var length = new FileInfo(path).Length;
             Append(new JournalRecord { Op = JournalRecord.FileReplacedOp, Path = path, Backup = name });
-            File.Move(path, backup);
+            MoveFile(path, backup, crossVolumeCopy, beforeCrossVolumeCopy);
             info.BackupBytes += length;
         }
     }
@@ -116,8 +119,19 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
             var name = $"d{++backupCounter:D7}";
             var backup = Path.Combine(backupDirectory, name);
             Append(new JournalRecord { Op = JournalRecord.DirReplacedOp, Path = path, Backup = name });
-            MoveDirectory(path, backup);
+            MoveDirectory(path, backup, crossVolumeCopy, beforeCrossVolumeCopy, markIncompleteBackup: true);
         }
+    }
+
+    /// <summary>
+    /// Test seam. Backups copy and then delete, as they do when the file and the undo folder are on different
+    /// volumes, even when both paths share a drive. <paramref name="beforeCopy"/> runs before each file is copied
+    /// and may throw to fail that copy partway.
+    /// </summary>
+    internal void UseCrossVolumeCopy(Action<string, string>? beforeCopy = null)
+    {
+        crossVolumeCopy = true;
+        beforeCrossVolumeCopy = beforeCopy;
     }
 
     public void RegistryKeyCreated(RegLocation location) =>
@@ -178,27 +192,145 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
         }
     }
 
-    internal static void MoveDirectory(string source, string destination)
+    /// <summary>
+    /// Moves <paramref name="source"/> to <paramref name="destination"/>. Across volumes that is a copy, and the
+    /// source is deleted only after the copy has fully succeeded.
+    /// </summary>
+    internal static void MoveFile(string source, string destination, bool forceCrossVolume = false, Action<string, string>? beforeCopy = null)
     {
         try
         {
+            if (forceCrossVolume)
+                throw new IOException("Cannot move a file to a different volume.");
+            File.Move(source, destination, overwrite: true);
+        }
+        catch (IOException) when (IsDifferentVolume(source, destination, forceCrossVolume))
+        {
+            // Publish under the backup name only once the copy has finished, so a partial file is not a backup.
+            var partial = PartialFilePath(destination);
+            try
+            {
+                beforeCopy?.Invoke(source, destination);
+                File.Copy(source, partial, overwrite: true);
+                File.Move(partial, destination, overwrite: true);
+            }
+            catch
+            {
+                TryDeleteFile(partial);
+                throw;
+            }
+            DeleteCopiedSource(source);
+        }
+    }
+
+    internal static void MoveDirectory(string source, string destination) =>
+        MoveDirectory(source, destination, forceCrossVolume: false, beforeCopy: null, markIncompleteBackup: false);
+
+    private static void MoveDirectory(string source, string destination, bool forceCrossVolume, Action<string, string>? beforeCopy, bool markIncompleteBackup)
+    {
+        try
+        {
+            if (forceCrossVolume)
+                throw new IOException("Cannot move a directory to a different volume.");
             System.IO.Directory.Move(source, destination);
         }
-        catch (IOException) when (!string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(destination), StringComparison.OrdinalIgnoreCase))
+        catch (IOException) when (IsDifferentVolume(source, destination, forceCrossVolume))
         {
-            // Directory.Move cannot cross volumes: copy, then delete.
-            CopyDirectory(source, destination);
+            // Directory.Move cannot cross volumes: copy, then delete the source.
+            // The marker goes down first, so a copy that dies partway is not a finished backup.
+            var marker = markIncompleteBackup ? IncompleteBackupMarker(destination) : null;
+            var copyFinished = false;
+            try
+            {
+                if (marker is not null)
+                    File.WriteAllText(marker, "");
+                CopyDirectory(source, destination, beforeCopy);
+                copyFinished = true;
+                if (marker is not null)
+                    File.Delete(marker);
+            }
+            catch
+            {
+                if (!copyFinished)
+                    RemovePartialBackup(destination, marker);
+                throw;
+            }
             System.IO.Directory.Delete(source, recursive: true);
         }
     }
 
-    private static void CopyDirectory(string source, string destination)
+    /// <summary>A directory backup undo may restore. Missing, or still marked unfinished, does not count.</summary>
+    internal static bool IsCompleteDirectoryBackup(string backupPath) =>
+        System.IO.Directory.Exists(backupPath) && !File.Exists(IncompleteBackupMarker(backupPath));
+
+    internal static string IncompleteBackupMarker(string backupPath) => backupPath + ".incomplete";
+
+    private static bool IsDifferentVolume(string source, string destination, bool force) =>
+        force || !string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(destination), StringComparison.OrdinalIgnoreCase);
+
+    private static string PartialFilePath(string destination)
+    {
+        var directory = Path.GetDirectoryName(destination)!;
+        return Path.Combine(directory, $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.partial");
+    }
+
+    private static void CopyDirectory(string source, string destination, Action<string, string>? beforeCopy)
     {
         System.IO.Directory.CreateDirectory(destination);
         foreach (var file in System.IO.Directory.EnumerateFiles(source))
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
+        {
+            var target = Path.Combine(destination, Path.GetFileName(file));
+            beforeCopy?.Invoke(file, target);
+            File.Copy(file, target, overwrite: true);
+        }
         foreach (var dir in System.IO.Directory.EnumerateDirectories(source))
-            CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)));
+            CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)), beforeCopy);
+    }
+
+    /// <summary>Drops a cross-volume copy that did not finish. The marker stays if the partial tree cannot be removed.</summary>
+    private static void RemovePartialBackup(string destination, string? marker)
+    {
+        try
+        {
+            if (System.IO.Directory.Exists(destination))
+                System.IO.Directory.Delete(destination, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (marker is null)
+            return;
+        try
+        {
+            if (File.Exists(marker))
+                File.Delete(marker);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The tree is already gone, so the marker alone is not a backup undo would restore.
+        }
+    }
+
+    private static void DeleteCopiedSource(string path)
+    {
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+            File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        File.Delete(path);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: the partial name is not the backup undo looks for.
+        }
     }
 
     public void Dispose()
