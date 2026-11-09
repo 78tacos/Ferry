@@ -93,6 +93,9 @@ public static class UndoEngine
             ? (await ReadLinesSharedAsync(progressPath, ct).ConfigureAwait(false)).Select(l => int.TryParse(l, out var n) ? n : -1).ToHashSet()
             : [];
         await using var progressLog = new StreamWriter(new FileStream(progressPath, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
+        // Pairing is redone from the whole journal, including lines already listed in undone.txt, so a crash
+        // after only one of the two lines is marked undone still suppresses the failed create.
+        var suppressedFileCreates = SuppressedFileCreates(records);
         try
         {
             for (var i = records.Count - 1; i >= 0; i--)
@@ -109,8 +112,16 @@ public static class UndoEngine
                     switch (r.Op)
                     {
                         case JournalRecord.FileCreatedOp:
-                            DeleteFile(r.Path!);
-                            files.FilesDone++;
+                            // A later fileCreateAbandoned means the restore already deleted this file. Leave
+                            // whatever is at the path now (a retry, or a file the user added) alone.
+                            if (!suppressedFileCreates.Contains(i))
+                            {
+                                DeleteFile(r.Path!);
+                                files.FilesDone++;
+                            }
+                            break;
+                        case JournalRecord.FileCreateAbandonedOp:
+                            // Bookkeeping for the matching fileCreated. Nothing was left at the path.
                             break;
                         case JournalRecord.FileReplacedOp:
                         {
@@ -231,6 +242,38 @@ public static class UndoEngine
         }
         using var target = baseKey.CreateSubKey(r.Reg!.Path, writable: true);
         target.SetValue(r.Name ?? "", r.Previous.ToRegistryObject(null), r.Previous.Kind);
+    }
+
+    /// <summary>
+    /// Indexes of <see cref="JournalRecord.FileCreatedOp"/> lines cancelled by a later
+    /// <see cref="JournalRecord.FileCreateAbandonedOp"/> for the same path. Each abandoned record cancels
+    /// one earlier create, newest first, so a retry that really did write the file is still undone.
+    /// </summary>
+    private static HashSet<int> SuppressedFileCreates(IReadOnlyList<JournalRecord> records)
+    {
+        var suppressed = new HashSet<int>();
+        var pending = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = records.Count - 1; i >= 0; i--)
+        {
+            var record = records[i];
+            if (record.Path is not { Length: > 0 } path)
+                continue;
+            switch (record.Op)
+            {
+                case JournalRecord.FileCreateAbandonedOp:
+                    pending.TryGetValue(path, out var abandoned);
+                    pending[path] = abandoned + 1;
+                    break;
+                case JournalRecord.FileCreatedOp when pending.TryGetValue(path, out var waiting) && waiting > 0:
+                    suppressed.Add(i);
+                    if (waiting == 1)
+                        pending.Remove(path);
+                    else
+                        pending[path] = waiting - 1;
+                    break;
+            }
+        }
+        return suppressed;
     }
 
     private static void DeleteFile(string path)

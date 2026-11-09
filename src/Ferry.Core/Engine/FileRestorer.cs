@@ -135,6 +135,7 @@ public sealed class FileRestorer(RestoreContext context)
         var target = context.Redirect(logicalPath);
         var results = context.Results;
         string? temp = null;
+        var journaledNewFile = false;
         try
         {
             FileOutcome outcome;
@@ -156,11 +157,15 @@ public sealed class FileRestorer(RestoreContext context)
 
             EnsureDirectory(Path.GetDirectoryName(target)!);
             // A file that replaces another is written aside first so the original stays intact until the new one is
-            // complete. A new file goes straight to its name: it's journaled first, so undo removes it even if
-            // Ferry dies part-way, and a failed write deletes it below.
+            // complete. A new file goes straight to its name and is journaled first, so undo removes a partial file
+            // if Ferry dies mid-write. A write that fails cleanly deletes that partial and appends a compensating
+            // record below, so undo does not later remove some other file at the same path.
             var replacing = outcome == FileOutcome.Replaced;
             if (!replacing)
+            {
                 context.Journal.FileCreated(target);
+                journaledNewFile = true;
+            }
             temp = replacing ? target + ".ferrytmp" : target;
             var isShortcut = remap is { IsEmpty: false } && target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
             long written;
@@ -225,8 +230,13 @@ public sealed class FileRestorer(RestoreContext context)
         finally
         {
             // Cancelled, damaged package, or a failed write: never leave a half-written file behind.
+            // Once that partial is gone, compensate the journal. Recording the create only after a
+            // successful write would leave a crash mid-write with nothing for undo to remove.
+            var createWasNotKept = journaledNewFile && temp is not null;
             if (temp is not null)
                 TryDelete(temp);
+            if (createWasNotKept && !File.Exists(target))
+                TryRecordAbandonedCreate(target);
             // A hash compare may have kept a copy of the entry. Drop it when the write never took it.
             entry?.ReleaseUnusedReplay();
         }
@@ -495,6 +505,19 @@ public sealed class FileRestorer(RestoreContext context)
     }
 
     private static bool IsDiskFull(IOException ex) => (ex.HResult & 0xFFFF) is 0x70 or 0x27;
+
+    /// <summary>The journaled create did not keep a file, so undo must not delete whatever shows up at this path later.</summary>
+    private void TryRecordAbandonedCreate(string path)
+    {
+        try
+        {
+            context.Journal.FileCreateAbandoned(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Debug($"Could not record that the new file at {path} was not kept: {ex.Message}");
+        }
+    }
 
     private static void TryDelete(string path)
     {
