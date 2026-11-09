@@ -46,6 +46,83 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task AFailedCrossVolumeFileCopyDoesNotLoseTheOriginalOnUndo()
+    {
+        var folder = TestEnvironment.NewFolder("undo-xvol-file");
+        var path = Path.Combine(folder, "settings.ini");
+        await File.WriteAllTextAsync(path, "original");
+        var journal = RollbackJournal.Create("OLDPC", []);
+        journal.UseCrossVolumeCopy((_, _) => throw new IOException("The disk is full."));
+
+        var error = Assert.Throws<IOException>(() => journal.BackupFile(path));
+        Assert.Equal("The disk is full.", error.Message);
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(journal.Directory, "backup")));
+
+        journal.Dispose();
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+        Assert.False(report.HasFailures);
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task AFailedCrossVolumeDirectoryCopyDoesNotLoseTheOriginalOnUndo()
+    {
+        var folder = TestEnvironment.NewFolder("undo-xvol-dir");
+        var dir = Path.Combine(folder, "Profile");
+        Directory.CreateDirectory(Path.Combine(dir, "Local"));
+        await File.WriteAllTextAsync(Path.Combine(dir, "Preferences"), "settings");
+        await File.WriteAllTextAsync(Path.Combine(dir, "Local", "Cookies"), "session");
+
+        var journal = RollbackJournal.Create("OLDPC", []);
+        var copies = 0;
+        journal.UseCrossVolumeCopy((_, _) =>
+        {
+            if (++copies >= 2)
+                throw new IOException("The disk is full.");
+        });
+
+        var error = Assert.Throws<IOException>(() => journal.BackupDirectory(dir));
+        Assert.Equal("The disk is full.", error.Message);
+        Assert.Equal("settings", await File.ReadAllTextAsync(Path.Combine(dir, "Preferences")));
+        Assert.Equal("session", await File.ReadAllTextAsync(Path.Combine(dir, "Local", "Cookies")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(journal.Directory, "backup")));
+
+        journal.Dispose();
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+        Assert.False(report.HasFailures);
+        Assert.Equal("settings", await File.ReadAllTextAsync(Path.Combine(dir, "Preferences")));
+        Assert.Equal("session", await File.ReadAllTextAsync(Path.Combine(dir, "Local", "Cookies")));
+    }
+
+    [Fact]
+    public async Task AnUnfinishedDirectoryBackupDoesNotReplaceTheOriginalOnUndo()
+    {
+        // A cross-volume copy that dies after creating the backup folder leaves the marker behind.
+        // Undo must not delete the surviving original and put that partial tree back.
+        var folder = TestEnvironment.NewFolder("undo-partial-dir");
+        var dir = Path.Combine(folder, "Profile");
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "Preferences"), "original");
+
+        var journal = RollbackJournal.Create("OLDPC", []);
+        journal.BackupDirectory(dir);
+        var saved = Directory.EnumerateDirectories(Path.Combine(journal.Directory, "backup")).Single();
+        Directory.Move(saved, dir);
+        Directory.CreateDirectory(saved);
+        await File.WriteAllTextAsync(Path.Combine(saved, "Preferences"), "partial");
+        await File.WriteAllTextAsync(RollbackJournal.IncompleteBackupMarker(saved), "");
+        Assert.False(RollbackJournal.IsCompleteDirectoryBackup(saved));
+        journal.Dispose();
+
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+        Assert.False(report.HasFailures);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(dir, "Preferences")));
+        Assert.Equal("partial", await File.ReadAllTextAsync(Path.Combine(saved, "Preferences")));
+        Assert.True(Directory.Exists(dir));
+    }
+
+    [Fact]
     public async Task ABackupRecordWithoutABackupLeavesTheFileAlone()
     {
         // The journal records a backup before moving the original; if the move never happened, undo must not delete it.
