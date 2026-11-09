@@ -31,8 +31,8 @@ Setting up many PCs, or running Ferry without anyone clicking through it? See th
 **On the old PC**
 
 1. **Turn on sync in Chrome, Edge or your other browser** (or export your saved passwords). Ferry moves your
-   bookmarks, history, extensions and settings. Saved passwords and cookies in Chrome, Edge, Brave, Vivaldi and
-   Opera only work on the PC that saved them, so they can't be moved. Firefox passwords do move.
+   bookmarks, history, extensions and settings. Saved passwords and cookies in Chrome, Edge, Brave, Vivaldi,
+   Chromium and Opera only work on the PC that saved them, so they can't be moved. Firefox passwords do move.
 2. **Close your programs**, especially browsers and Outlook, so their data is copied in one piece.
 
 **On both PCs**
@@ -266,7 +266,7 @@ space, but the move can no longer be undone.
 | Program settings in your user folder and registry | |
 | Wi-Fi networks and their passwords, printers, mapped drives | Printer drivers that aren't available on the new PC |
 | Wallpaper, colors, mouse and keyboard settings, taskbar and Start pins, fonts, accessibility options | Default apps (listed for you to set) |
-| Browser bookmarks, history, extensions and settings. Firefox passwords too. | Saved passwords and cookies in Chrome, Edge, Brave, Vivaldi and Opera |
+| Browser bookmarks, history, extensions and settings. Firefox passwords too. | Saved passwords and cookies in Chrome, Edge, Brave, Vivaldi, Chromium and Opera |
 | Outlook signatures and `.pst` files, Office templates, dictionaries, Sticky Notes | Your email itself: it comes back from the mail server when you sign in |
 
 ## If something goes wrong
