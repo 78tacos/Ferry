@@ -1,4 +1,5 @@
 using Ferry.Core.Engine;
+using Ferry.Core.Infrastructure;
 using Ferry.Core.Model;
 using Ferry.Core.Packaging;
 
@@ -53,6 +54,21 @@ public abstract class MigratorBase : IMigrator
 
     /// <summary>"&lt;Id&gt;/&lt;part&gt;/&lt;part&gt;…" for entries this migrator writes.</summary>
     protected string Entry(params string[] parts) => EntryNames.Combine([Id, .. parts]);
+
+    /// <summary>
+    /// The destination for one package entry. Null when <paramref name="relative"/> would leave <paramref name="root"/>:
+    /// the entry is counted as a failed file and its content is discarded, and the rest of the restore continues.
+    /// </summary>
+    protected static async Task<string?> JoinUnderAsync(RestoreContext context, InventoryItem item, PackageEntry entry,
+        string root, string relative, CancellationToken ct)
+    {
+        if (PackagePaths.TryCombineUnder(root, relative, out var path))
+            return path;
+        context.Results.FileFailed(item, relative.Length == 0 ? entry.Name : relative,
+            "it points outside the destination folder, so it was not restored.");
+        await entry.SkipAsync(ct).ConfigureAwait(false);
+        return null;
+    }
 }
 
 public static class EntryNames

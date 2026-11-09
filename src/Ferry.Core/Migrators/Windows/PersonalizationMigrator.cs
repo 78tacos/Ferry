@@ -195,7 +195,9 @@ public sealed partial class PersonalizationMigrator : MigratorBase
             case "wallpaper":
             {
                 var folder = Path.Combine(context.TargetFolder(target, KnownFolders.Pictures), $"Wallpapers from {context.SourceComputer}");
-                var path = Path.Combine(folder, tail);
+                var path = await JoinUnderAsync(context, item, entry, folder, tail, ct).ConfigureAwait(false);
+                if (path is null)
+                    break;
                 await context.Files.RestoreAsync(entry, item, path, ct, policy: ConflictPolicy.Overwrite).ConfigureAwait(false);
                 lock (wallpapers)
                     wallpapers.Restored[item.Id] = path;
@@ -210,7 +212,10 @@ public sealed partial class PersonalizationMigrator : MigratorBase
                     await entry.SkipAsync(ct).ConfigureAwait(false);
                     break;
                 }
-                var path = Path.Combine(context.TargetFolder(target, spec.Base), spec.RelativeDir, relative);
+                var path = await JoinUnderAsync(context, item, entry, Path.Combine(context.TargetFolder(target, spec.Base), spec.RelativeDir), relative, ct)
+                    .ConfigureAwait(false);
+                if (path is null)
+                    break;
                 await context.Files.RestoreAsync(entry, item, path, ct, remap, ConflictPolicy.Overwrite).ConfigureAwait(false);
                 break;
             }

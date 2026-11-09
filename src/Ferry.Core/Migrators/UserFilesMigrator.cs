@@ -160,29 +160,33 @@ public sealed class UserFilesMigrator : MigratorBase
         // files/<sid>/<kind>/<key>/<relative>  or  files/<sid>/r/<file>
         var rest = EntryNames.After(entry.Name, Entry(item.UserSid!))!;
         var (kind, tail) = EntryNames.SplitFirst(rest);
-        string logicalPath;
+        string? logicalPath;
         switch (kind)
         {
             case KnownFolderKind:
             {
                 var (folderKey, relative) = EntryNames.SplitFirst(tail);
                 var folder = KnownFolders.ByKey(folderKey);
-                var root = folder is null ? Path.Combine(target.ProfilePath, folderKey) : context.TargetFolder(target, folder);
-                logicalPath = Path.Combine(root, relative);
+                // An unknown key is a name from the package, not a folder this PC resolved, so it stays under the profile.
+                logicalPath = folder is null
+                    ? await JoinUnderAsync(context, item, entry, target.ProfilePath, Path.Combine(folderKey, relative), ct).ConfigureAwait(false)
+                    : await JoinUnderAsync(context, item, entry, context.TargetFolder(target, folder), relative, ct).ConfigureAwait(false);
                 break;
             }
             case ProfileFolderKind:
             {
                 var (folderName, relative) = EntryNames.SplitFirst(tail);
-                logicalPath = Path.Combine(target.ProfilePath, folderName, relative);
+                logicalPath = await JoinUnderAsync(context, item, entry, target.ProfilePath, Path.Combine(folderName, relative), ct).ConfigureAwait(false);
                 break;
             }
             case ProfileRootKind:
-                logicalPath = Path.Combine(target.ProfilePath, tail);
+                logicalPath = await JoinUnderAsync(context, item, entry, target.ProfilePath, tail, ct).ConfigureAwait(false);
                 break;
             default:
                 return;
         }
+        if (logicalPath is null)
+            return;
 
         context.Status(item, logicalPath);
         if (entry.Kind == EntryKind.Directory)

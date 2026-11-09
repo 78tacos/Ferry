@@ -231,7 +231,9 @@ public sealed class ApplicationsMigrator : MigratorBase
             case "files":
             {
                 var root = TargetInstallPath(context, app.InstallLocation!);
-                var logical = Path.Combine(root, tail);
+                var logical = await JoinUnderAsync(context, item, entry, root, tail, ct).ConfigureAwait(false);
+                if (logical is null)
+                    break;
                 context.Status(item, logical);
                 if (entry.Kind == EntryKind.Directory)
                     context.Files.RestoreDirectory(entry, logical);
@@ -272,7 +274,10 @@ public sealed class ApplicationsMigrator : MigratorBase
                 var root = tag == "desktop"
                     ? Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)
                     : Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
-                await context.Files.RestoreAsync(entry, item, Path.Combine(root, relative), ct, InstallRemap(context, app), ConflictPolicy.Overwrite)
+                var logical = await JoinUnderAsync(context, item, entry, root, relative, ct).ConfigureAwait(false);
+                if (logical is null)
+                    break;
+                await context.Files.RestoreAsync(entry, item, logical, ct, InstallRemap(context, app), ConflictPolicy.Overwrite)
                     .ConfigureAwait(false);
                 break;
             }
