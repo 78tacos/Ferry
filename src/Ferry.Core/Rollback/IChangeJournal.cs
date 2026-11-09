@@ -11,6 +11,12 @@ public interface IChangeJournal
 {
     void FileCreated(string path);
 
+    /// <summary>
+    /// A <see cref="FileCreated"/> whose file was removed because the write failed. Undo must not delete
+    /// a different file that appears at the path later. Record it only after the partial file is gone.
+    /// </summary>
+    void FileCreateAbandoned(string path);
+
     /// <summary>Moves an existing file into undo storage. The path is free to be written afterwards.</summary>
     void BackupFile(string path);
 
@@ -34,6 +40,7 @@ public sealed class NullJournal : IChangeJournal
     public static readonly NullJournal Instance = new();
 
     public void FileCreated(string path) { }
+    public void FileCreateAbandoned(string path) { }
     public void BackupFile(string path) { }
     public void DirectoryCreated(string path) { }
     public void BackupDirectory(string path) { }

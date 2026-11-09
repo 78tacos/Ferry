@@ -82,6 +82,33 @@ public sealed class RestoreAndUndoTests : IDisposable
     }
 
     [Fact]
+    public async Task AFailedCreateDoesNotLetUndoDeleteAFilePlantedLater()
+    {
+        // The create is journaled before the write. A directory already at the path fails that write, the
+        // partial is removed, and a file placed there afterwards is not one the migration kept.
+        var (context, journal, results, item) = Context(ConflictPolicy.KeepBoth);
+        var target = Path.Combine(folder, "created-then-removed.txt");
+        Directory.CreateDirectory(target);
+
+        var outcome = await context.Files.RestoreAsync(await Entry("migrated", OldTime), item, target, default);
+
+        Assert.Equal(FileOutcome.Failed, outcome);
+        Assert.Equal(1, results.For(item).FilesFailed);
+        if (Directory.Exists(target))
+            Directory.Delete(target);
+        else if (File.Exists(target))
+            File.Delete(target);
+        await File.WriteAllTextAsync(target, "planted after the failed restore");
+
+        journal.Complete(UndoStatus.Completed);
+        journal.Dispose();
+        var report = await UndoEngine.UndoAsync(journal.Id, null, default, platformServices: false);
+
+        Assert.False(report.HasFailures);
+        Assert.Equal("planted after the failed restore", await File.ReadAllTextAsync(target));
+    }
+
+    [Fact]
     public async Task KeepBothSavesAlongsideAndDoesNotPileUpOnRerun()
     {
         var existing = Existing("report.docx", "mine", NewTime);

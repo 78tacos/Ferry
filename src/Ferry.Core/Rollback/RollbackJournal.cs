@@ -40,6 +40,7 @@ public sealed class JournalRecord
     public string? Args { get; set; }
 
     public const string FileCreatedOp = "fileCreated";
+    public const string FileCreateAbandonedOp = "fileCreateAbandoned";
     public const string FileReplacedOp = "fileReplaced";
     public const string DirCreatedOp = "dirCreated";
     public const string DirReplacedOp = "dirReplaced";
@@ -91,6 +92,12 @@ public sealed class RollbackJournal : IChangeJournal, IDisposable
     }
 
     public void FileCreated(string path) => Append(new JournalRecord { Op = JournalRecord.FileCreatedOp, Path = path });
+
+    /// <summary>
+    /// The matching <see cref="FileCreated"/> did not keep a file. Undo then leaves a later file at
+    /// <paramref name="path"/> alone instead of deleting it with that create.
+    /// </summary>
+    public void FileCreateAbandoned(string path) => Append(new JournalRecord { Op = JournalRecord.FileCreateAbandonedOp, Path = path });
 
     /// <remarks>
     /// The record goes in first: if the move then fails or the process dies, undo finds no backup and leaves
